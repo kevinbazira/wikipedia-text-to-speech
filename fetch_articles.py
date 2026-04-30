@@ -1,6 +1,8 @@
 import wikipediaapi
 import re
 
+from worker import generate_section_audio
+
 # Initialize the Wikipedia API client (WMF requires a proper User-Agent)
 user_agent = "WMF ML Team TTS model-server (LiftWing)"
 wiki = wikipediaapi.Wikipedia(user_agent, "en")
@@ -75,10 +77,15 @@ def process_article(page_title: str):
 if __name__ == "__main__":
     # For the PoC, we will start with a small sample of highly visited articles
     test_articles =[
+        "Python_(programming_language)"
+    ]
+    """
+    test_articles =[
         "Python_(programming_language)",
         "Earth",
         "Artificial_intelligence"
     ]
+    """
     
     all_jobs =[]
     for article in test_articles:
@@ -87,4 +94,13 @@ if __name__ == "__main__":
         
     print(f"\nTotal sections prepared for the TTS queue: {len(all_jobs)}")
     
-    # In Step 3, we will push 'all_jobs' into Redis/Celery!
+    # Push all extracted sections into the Celery/Redis queue!
+    for job in all_jobs:
+        # .delay() is Celery's way of saying "send this to the background worker"
+        generate_section_audio.delay(
+            article=job["article"], 
+            section=job["section"], 
+            text=job["text"]
+        )
+        
+    print(f"\nSuccessfully pushed {len(all_jobs)} tasks to the Redis queue!")
