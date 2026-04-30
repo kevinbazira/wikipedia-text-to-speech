@@ -69,7 +69,7 @@ def generate_section_audio(article: str, section: str, text: str):
     subprocess.run(ffmpeg_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 5. Clean up the massive WAV file
-    # os.remove(wav_path) # disable so I can see how big the wav files are, will be re-enable after testing
+    os.remove(wav_path)
     
     print(f"Finished: {mp3_path}")
     return mp3_path

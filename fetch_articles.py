@@ -77,15 +77,10 @@ def process_article(page_title: str):
 if __name__ == "__main__":
     # For the PoC, we will start with a small sample of highly visited articles
     test_articles =[
-        "Python_(programming_language)"
-    ]
-    """
-    test_articles =[
         "Python_(programming_language)",
         "Earth",
         "Artificial_intelligence"
     ]
-    """
     
     all_jobs =[]
     for article in test_articles:
