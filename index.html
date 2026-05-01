@@ -3,42 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wikipedia TTS Prototype</title>
+    <title>Wikipedia TTS Service | WMF ML</title>
     <!-- Bootstrap 5 CSS CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light">
+    <style>
+        /* Wikimedia UI (WMUI) Design Tokens */
+        :root {
+            --wmui-color-base: #202122;
+            --wmui-color-subtle: #72777d;
+            --wmui-color-primary: #3366cc;
+            --wmui-color-primary-hover: #2a4b8d;
+            --wmui-color-border: #a2a9b1;
+            --wmui-color-background: #eaecf0;
+            --wmui-color-surface: #ffffff;
+            --wmui-color-warning: #fed500;
+            --wmui-color-error: #d33;
+        }
 
-    <!-- Navigation Bar -->
-    <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">Wikipedia TTS Service</span>
-            <span class="navbar-text text-light small">WMF ML Team Prototype</span>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Lato, Helvetica, Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: var(--wmui-color-base);
+        }
+
+        /* Wikimedia-style Header */
+        .navbar-wm {
+            background-color: var(--wmui-color-surface);
+            border-bottom: 1px solid var(--wmui-color-border);
+        }
+        .wm-logo-text {
+            font-family: 'Linux Libertine', 'Georgia', 'Times', serif;
+            font-size: 1.5rem;
+            color: var(--wmui-color-base);
+            text-decoration: none;
+        }
+        .wm-logo-text span {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 1rem;
+            color: var(--wmui-color-subtle);
+            font-weight: 400;
+            margin-left: 8px;
+        }
+
+        /* Wikipedia Article Headings */
+        .wiki-heading {
+            font-family: 'Linux Libertine', 'Georgia', 'Times', serif;
+            border-bottom: 1px solid var(--wmui-color-border);
+            padding-bottom: 0.25em;
+            margin-bottom: 0.5em;
+            color: var(--wmui-color-base);
+        }
+
+        /* WMUI Form Elements (Sharp edges, specific border colors) */
+        .form-control-wm {
+            border: 1px solid var(--wmui-color-border);
+            border-radius: 2px;
+            color: var(--wmui-color-base);
+        }
+        .form-control-wm:focus {
+            border-color: var(--wmui-color-primary);
+            box-shadow: 0 0 0 1px var(--wmui-color-primary);
+        }
+
+        /* WMUI Progressive Button (Primary Action) */
+        .btn-progressive {
+            background-color: var(--wmui-color-primary);
+            color: white;
+            border: 1px solid var(--wmui-color-primary);
+            border-radius: 2px;
+            font-weight: bold;
+            transition: background-color 100ms;
+        }
+        .btn-progressive:hover {
+            background-color: var(--wmui-color-primary-hover);
+            color: white;
+        }
+
+        /* WMUI Quiet Button (Secondary Action) */
+        .btn-quiet {
+            background-color: transparent;
+            color: var(--wmui-color-base);
+            border: 1px solid var(--wmui-color-border);
+            border-radius: 2px;
+            font-weight: bold;
+            transition: background-color 100ms;
+        }
+        .btn-quiet:hover {
+            background-color: var(--wmui-color-background);
+            color: var(--wmui-color-base);
+        }
+
+        /* Card Styling */
+        .card-wm {
+            border: 1px solid var(--wmui-color-border);
+            border-radius: 2px;
+            background-color: var(--wmui-color-surface);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .section-row {
+            border-bottom: 1px solid var(--wmui-color-background);
+        }
+        .section-row:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- WMF Navbar -->
+    <nav class="navbar navbar-wm mb-4 py-3">
+        <div class="container d-flex align-items-center">
+            <!-- Authentic Serif Logo Text -->
+            <a class="wm-logo-text" href="/">
+                WIKIPEDIA <span>TTS Service (Prototype)</span>
+            </a>
+            <span class="badge bg-secondary rounded-pill">WMF ML Team</span>
         </div>
     </nav>
 
     <!-- Main Content Container -->
-    <div class="container" style="max-width: 900px;">
+    <div class="container" style="max-width: 850px;">
         
-        <!-- Input Card -->
-        <div class="card shadow-sm mb-4 border-0">
-            <div class="card-body p-4">
-                <h5 class="card-title mb-3">Generate Audio</h5>
-                <p class="card-text text-muted">Enter a Wikipedia article title (or multiple separated by a pipe <code>|</code>) to extract and generate audio for its sections.</p>
-                
-                <div class="input-group input-group-lg mb-3">
-                    <input type="text" class="form-control bg-light" id="articleInput" placeholder="e.g. Earth | Python_(programming_language)">
-                    <button class="btn btn-primary px-4 fw-bold" type="button" id="generateBtn" onclick="generateTTS()">
-                        Queue Audio
-                    </button>
-                </div>
+        <!-- Welcome Heading -->
+        <h1 class="wiki-heading fs-2">Generate article audio</h1>
+        <p class="text-muted mb-4">Enter a Wikipedia article title (or multiple separated by a pipe <code>|</code>) to extract its text, normalize it, and generate high-quality audio segments.</p>
 
-                <!-- Loading Spinner (Hidden by default) -->
-                <div id="loadingMsg" class="d-none text-center my-4">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2 text-muted fw-bold">Queuing articles in the ML pipeline... Please wait.</p>
+        <!-- Input Card -->
+        <div class="card-wm p-4 mb-4">
+            <label for="articleInput" class="form-label fw-bold">Article Title(s)</label>
+            <div class="input-group input-group-lg mb-2">
+                <input type="text" class="form-control form-control-wm bg-light fs-6" id="articleInput" placeholder="e.g. Earth | Python_(programming_language)">
+                <button class="btn btn-progressive px-4" type="button" id="generateBtn" onclick="generateTTS()">
+                    Queue Audio
+                </button>
+            </div>
+
+            <!-- Loading Spinner (Hidden by default) -->
+            <div id="loadingMsg" class="d-none mt-3">
+                <div class="d-flex align-items-center text-primary" style="color: var(--wmui-color-primary) !important;">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    <strong>Queuing articles in the ML pipeline...</strong>
                 </div>
             </div>
         </div>
@@ -73,40 +177,41 @@
                 const response = await fetch(`/generate?articles=${encodeURIComponent(input)}`, { method: 'POST' });
                 const data = await response.json();
                 
-                let html = `<h4 class="mb-3 text-secondary">Queue Results <span class="badge bg-success fs-6">${data.message}</span></h4>`;
+                let html = `<h2 class="wiki-heading fs-4 mt-5 mb-3">Queue Results <span class="badge bg-success ms-2 fs-6 fw-normal">${data.message}</span></h2>`;
 
                 data.details.forEach(item => {
-                    // Create a Bootstrap Card for each Article
+                    html += `<div class="card-wm mb-4">`;
+                    
+                    // Article Header (Uses Wiki Serif font)
                     html += `
-                    <div class="card shadow-sm mb-4 border-0 overflow-hidden">
-                        <div class="card-header bg-white py-3 border-bottom-0">
-                            <h5 class="mb-0">📄 ${item.article}</h5>
+                        <div class="p-3" style="background-color: #f8f9fa; border-bottom: 1px solid var(--wmui-color-border);">
+                            <h3 class="wiki-heading border-0 mb-0 fs-5 pb-0">📄 ${item.article}</h3>
                         </div>
-                        <ul class="list-group list-group-flush border-top">`;
+                        <div class="p-0">`;
                     
                     if (item.status === 'error') {
-                        html += `<li class="list-group-item text-danger py-3"> Error: ${item.message}</li></ul></div>`;
-                        return; // Skip to next article
+                        html += `<div class="p-3 text-danger fw-bold">❌ Error: ${item.message}</div></div></div>`;
+                        return;
                     }
 
                     // Draw a row for every section
                     item.section_names.forEach(section => {
                         html += `
-                            <li class="list-group-item d-flex justify-content-between align-items-center py-3 bg-light">
-                                <span class="fw-bold text-dark">${section}</span>
-                                <div style="min-width: 300px; text-align: right;">
-                                    <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadAudio(this, '${item.article}', '${section}')">
+                            <div class="section-row d-flex flex-column flex-md-row justify-content-between align-items-md-center p-3">
+                                <span class="fw-bold mb-2 mb-md-0" style="color: var(--wmui-color-base);">${section}</span>
+                                <div style="min-width: 250px; text-align: right;" id="player-container-${item.article}-${section}">
+                                    <button class="btn btn-quiet btn-sm px-3 w-100" onclick="loadAudio(this, '${item.article}', '${section}')">
                                         🔊 Check Status / Play
                                     </button>
                                 </div>
-                            </li>`;
+                            </div>`;
                     });
-                    html += `</ul></div>`;
+                    html += `</div></div>`;
                 });
 
                 resultsContainer.innerHTML = html;
             } catch (err) {
-                resultsContainer.innerHTML = `<div class="alert alert-danger"> API Error: Make sure the FastAPI server is running!</div>`;
+                resultsContainer.innerHTML = `<div class="alert alert-danger" style="border-radius: 2px;">❌ API Error: Make sure the FastAPI server is running!</div>`;
             } finally {
                 // UI State: Reset
                 generateBtn.disabled = false;
@@ -114,7 +219,7 @@
             }
         }
 
-        // Tries to load the audio. Replaces alert() popups with smooth button transitions!
+        // Tries to load the audio. Replaces buttons smoothly with loading indicators or actual audio players.
         async function loadAudio(btnElement, article, section) {
             const originalText = btnElement.innerHTML;
             
@@ -128,29 +233,35 @@
                 const res = await fetch(audioUrl);
                 
                 if (res.status === 404) {
-                    // Audio not ready: Show warning badge on the button for 4 seconds
-                    btnElement.classList.replace('btn-outline-primary', 'btn-warning');
-                    btnElement.classList.remove('btn-outline-primary'); // fallback
+                    // Audio not ready: Style as a Warning Badge (Wiki Yellow)
+                    btnElement.style.backgroundColor = 'var(--wmui-color-warning)';
+                    btnElement.style.borderColor = '#c8a900'; // Darker yellow border
+                    btnElement.style.color = '#000';
                     btnElement.innerHTML = `⏳ Still Processing...`;
                     
                     setTimeout(() => {
-                        btnElement.classList.replace('btn-warning', 'btn-outline-primary');
+                        // Reset button
+                        btnElement.style.backgroundColor = '';
+                        btnElement.style.borderColor = '';
+                        btnElement.style.color = '';
                         btnElement.innerHTML = originalText;
                         btnElement.disabled = false;
                     }, 4000);
 
                 } else if (res.ok) {
-                    // Audio is ready: Replace the button with a full-width HTML5 Audio Player!
-                    const playerContainer = btnElement.parentElement;
+                    // Audio is ready: Render native audio player seamlessly
+                    const playerContainer = document.getElementById(`player-container-${article}-${section}`);
                     playerContainer.innerHTML = `<audio controls autoplay class="w-100" src="${audioUrl}"></audio>`;
                 }
             } catch (err) {
                 // Network Error
-                btnElement.classList.replace('btn-outline-primary', 'btn-danger');
-                btnElement.innerHTML = ` Network Error`;
+                btnElement.style.backgroundColor = 'var(--wmui-color-error)';
+                btnElement.style.color = '#fff';
+                btnElement.innerHTML = `❌ Network Error`;
                 
                 setTimeout(() => {
-                    btnElement.classList.replace('btn-danger', 'btn-outline-primary');
+                    btnElement.style.backgroundColor = '';
+                    btnElement.style.color = '';
                     btnElement.innerHTML = originalText;
                     btnElement.disabled = false;
                 }, 3000);
