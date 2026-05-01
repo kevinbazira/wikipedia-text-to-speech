@@ -2,12 +2,12 @@ import os
 import re
 import wikipediaapi
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from worker import generate_section_audio
 
 # Initialize FastAPI
-app = FastAPI(title="Wikipedia TTS Audio Service | WMF ML Team Prototype")
+app = FastAPI(title="Wikipedia TTS Prototype | WMF ML Team")
 
 # Allow frontend clients to call this API without CORS errors
 app.add_middleware(
@@ -40,6 +40,16 @@ def clean_spoken_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)
 
     return text.strip()
+
+@app.get("/", response_class=HTMLResponse)
+def serve_ui():
+    """
+    Serves the index.html front-end.
+    Will likely not be required in the LiftWing production setup as Wikipedia will be the front-end.
+    It's convenient for this prototype to keep it all in one place that's easy to demo.
+    """
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 @app.post("/generate")
 def generate_audio(articles: str):
@@ -74,12 +84,14 @@ def generate_audio(articles: str):
             continue
 
         sections_queued = 0
+        section_names =[]
 
         # Queue Lead Section
         lead_text = clean_spoken_text(page.summary)
         if len(lead_text) > 50:
             generate_section_audio.delay(article=page.title, section="Lead", text=lead_text)
             sections_queued += 1
+            section_names.append("Lead")
 
         # Queue remaining sections
         for section in page.sections:
@@ -90,11 +102,13 @@ def generate_audio(articles: str):
             if len(cleaned_text) > 50:
                 generate_section_audio.delay(article=page.title, section=section.title, text=cleaned_text)
                 sections_queued += 1
+                section_names.append(section.title)
 
         results.append({
             "article": page.title,
             "status": "queued",
-            "sections_queued": sections_queued
+            "sections_queued": sections_queued,
+            "section_names": section_names
         })
         total_sections_queued += sections_queued
 

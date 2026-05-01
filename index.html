@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wikipedia TTS Prototype</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8f9fa;
+            color: #202122;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1 { border-bottom: 1px solid #a2a9b1; padding-bottom: 10px; }
+        .card {
+            background: white;
+            border: 1px solid #a2a9b1;
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        input[type="text"] {
+            width: 70%;
+            padding: 10px;
+            font-size: 16px;
+            border: 1px solid #a2a9b1;
+            border-radius: 2px;
+        }
+        button {
+            background-color: #3366cc;
+            color: white;
+            border: none;
+            padding: 11px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-weight: bold;
+        }
+        button:hover { background-color: #2a4b8d; }
+        .btn-secondary {
+            background-color: #eaecf0;
+            color: #202122;
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+        .btn-secondary:hover { background-color: #c8ccd1; }
+        .section-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #eaecf0;
+        }
+        .section-item:last-child { border-bottom: none; }
+        .loading { color: #d33; font-weight: bold; display: none; }
+    </style>
+</head>
+<body>
+
+    <h1>Wikipedia TTS Prototype</h1>
+    <p>Enter a Wikipedia article title (or multiple separated by a pipe <code>|</code>) to generate high-quality audio sections.</p>
+
+    <div class="card">
+        <input type="text" id="articleInput" placeholder="e.g. Earth | Python_(programming_language)">
+        <button onclick="generateTTS()">Generate Audio</button>
+        <p class="loading" id="loadingMsg">Queuing articles in the ML pipeline... Please wait.</p>
+    </div>
+
+    <div id="resultsContainer"></div>
+
+    <script>
+        async function generateTTS() {
+            const input = document.getElementById('articleInput').value;
+            if (!input) return alert("Please enter an article title.");
+
+            document.getElementById('loadingMsg').style.display = "block";
+            document.getElementById('resultsContainer').innerHTML = "";
+
+            try {
+                // Call the FastAPI /generate endpoint
+                const response = await fetch(`/generate?articles=${encodeURIComponent(input)}`, { method: 'POST' });
+                const data = await response.json();
+                
+                let html = `<h2>Results (${data.message})</h2>`;
+
+                data.details.forEach(item => {
+                    html += `<div class="card"><h3>📄 ${item.article}</h3>`;
+                    
+                    if (item.status === 'error') {
+                        html += `<p style="color:red">Error: ${item.message}</p></div>`;
+                        return;
+                    }
+
+                    // Draw a row for every section
+                    item.section_names.forEach(section => {
+                        html += `
+                            <div class="section-item">
+                                <span><strong>${section}</strong></span>
+                                <div id="player-${item.article}-${section}">
+                                    <button class="btn-secondary" onclick="loadAudio(this, '${item.article}', '${section}')">
+                                        Check Status / Play
+                                    </button>
+                                </div>
+                            </div>`;
+                    });
+                    html += `</div>`;
+                });
+
+                document.getElementById('resultsContainer').innerHTML = html;
+            } catch (err) {
+                alert("API Error: Make sure the FastAPI server is running!");
+            } finally {
+                document.getElementById('loadingMsg').style.display = "none";
+            }
+        }
+
+        // Tries to load the audio. If 404, tells user to wait. If 200, renders player.
+        async function loadAudio(btnElement, article, section) {
+            const originalText = btnElement.innerText;
+            btnElement.innerText = "Checking...";
+            
+            const audioUrl = `/audio?article=${encodeURIComponent(article)}&section=${encodeURIComponent(section)}`;
+            
+            try {
+                const res = await fetch(audioUrl);
+                if (res.status === 404) {
+                    alert(`Still processing "${section}" in the background! \n\nSince this runs on a CPU prototype, it may take several minutes. Try again shortly.`);
+                    btnElement.innerText = originalText;
+                } else if (res.ok) {
+                    // Replace the button with an actual HTML5 Audio Player
+                    const playerDiv = document.getElementById(`player-${article}-${section}`);
+                    playerDiv.innerHTML = `<audio controls autoplay src="${audioUrl}"></audio>`;
+                }
+            } catch (err) {
+                alert("Network error.");
+                btnElement.innerText = originalText;
+            }
+        }
+    </script>
+</body>
+</html>
