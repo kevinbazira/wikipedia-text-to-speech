@@ -4,139 +4,156 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wikipedia TTS Prototype</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f8f9fa;
-            color: #202122;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-        h1 { border-bottom: 1px solid #a2a9b1; padding-bottom: 10px; }
-        .card {
-            background: white;
-            border: 1px solid #a2a9b1;
-            border-radius: 4px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        input[type="text"] {
-            width: 70%;
-            padding: 10px;
-            font-size: 16px;
-            border: 1px solid #a2a9b1;
-            border-radius: 2px;
-        }
-        button {
-            background-color: #3366cc;
-            color: white;
-            border: none;
-            padding: 11px 20px;
-            font-size: 16px;
-            cursor: pointer;
-            border-radius: 2px;
-            font-weight: bold;
-        }
-        button:hover { background-color: #2a4b8d; }
-        .btn-secondary {
-            background-color: #eaecf0;
-            color: #202122;
-            padding: 8px 15px;
-            font-size: 14px;
-        }
-        .btn-secondary:hover { background-color: #c8ccd1; }
-        .section-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 15px 0;
-            border-bottom: 1px solid #eaecf0;
-        }
-        .section-item:last-child { border-bottom: none; }
-        .loading { color: #d33; font-weight: bold; display: none; }
-    </style>
+    <!-- Bootstrap 5 CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
-<body>
+<body class="bg-light">
 
-    <h1>Wikipedia TTS Prototype</h1>
-    <p>Enter a Wikipedia article title (or multiple separated by a pipe <code>|</code>) to generate high-quality audio sections.</p>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
+        <div class="container">
+            <span class="navbar-brand mb-0 h1">Wikipedia TTS Service</span>
+            <span class="navbar-text text-light small">WMF ML Team Prototype</span>
+        </div>
+    </nav>
 
-    <div class="card">
-        <input type="text" id="articleInput" placeholder="e.g. Earth | Python_(programming_language)">
-        <button onclick="generateTTS()">Generate Audio</button>
-        <p class="loading" id="loadingMsg">Queuing articles in the ML pipeline... Please wait.</p>
+    <!-- Main Content Container -->
+    <div class="container" style="max-width: 900px;">
+        
+        <!-- Input Card -->
+        <div class="card shadow-sm mb-4 border-0">
+            <div class="card-body p-4">
+                <h5 class="card-title mb-3">Generate Audio</h5>
+                <p class="card-text text-muted">Enter a Wikipedia article title (or multiple separated by a pipe <code>|</code>) to extract and generate audio for its sections.</p>
+                
+                <div class="input-group input-group-lg mb-3">
+                    <input type="text" class="form-control bg-light" id="articleInput" placeholder="e.g. Earth | Python_(programming_language)">
+                    <button class="btn btn-primary px-4 fw-bold" type="button" id="generateBtn" onclick="generateTTS()">
+                        Queue Audio
+                    </button>
+                </div>
+
+                <!-- Loading Spinner (Hidden by default) -->
+                <div id="loadingMsg" class="d-none text-center my-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted fw-bold">Queuing articles in the ML pipeline... Please wait.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Container -->
+        <div id="resultsContainer"></div>
+
     </div>
 
-    <div id="resultsContainer"></div>
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         async function generateTTS() {
             const input = document.getElementById('articleInput').value;
-            if (!input) return alert("Please enter an article title.");
+            const generateBtn = document.getElementById('generateBtn');
+            const loadingMsg = document.getElementById('loadingMsg');
+            const resultsContainer = document.getElementById('resultsContainer');
 
-            document.getElementById('loadingMsg').style.display = "block";
-            document.getElementById('resultsContainer').innerHTML = "";
+            if (!input) {
+                alert("Please enter an article title.");
+                return;
+            }
+
+            // UI State: Loading
+            generateBtn.disabled = true;
+            loadingMsg.classList.remove('d-none');
+            resultsContainer.innerHTML = "";
 
             try {
                 // Call the FastAPI /generate endpoint
                 const response = await fetch(`/generate?articles=${encodeURIComponent(input)}`, { method: 'POST' });
                 const data = await response.json();
                 
-                let html = `<h2>Results (${data.message})</h2>`;
+                let html = `<h4 class="mb-3 text-secondary">Queue Results <span class="badge bg-success fs-6">${data.message}</span></h4>`;
 
                 data.details.forEach(item => {
-                    html += `<div class="card"><h3>📄 ${item.article}</h3>`;
+                    // Create a Bootstrap Card for each Article
+                    html += `
+                    <div class="card shadow-sm mb-4 border-0 overflow-hidden">
+                        <div class="card-header bg-white py-3 border-bottom-0">
+                            <h5 class="mb-0">📄 ${item.article}</h5>
+                        </div>
+                        <ul class="list-group list-group-flush border-top">`;
                     
                     if (item.status === 'error') {
-                        html += `<p style="color:red">Error: ${item.message}</p></div>`;
-                        return;
+                        html += `<li class="list-group-item text-danger py-3"> Error: ${item.message}</li></ul></div>`;
+                        return; // Skip to next article
                     }
 
                     // Draw a row for every section
                     item.section_names.forEach(section => {
                         html += `
-                            <div class="section-item">
-                                <span><strong>${section}</strong></span>
-                                <div id="player-${item.article}-${section}">
-                                    <button class="btn-secondary" onclick="loadAudio(this, '${item.article}', '${section}')">
-                                        Check Status / Play
+                            <li class="list-group-item d-flex justify-content-between align-items-center py-3 bg-light">
+                                <span class="fw-bold text-dark">${section}</span>
+                                <div style="min-width: 300px; text-align: right;">
+                                    <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="loadAudio(this, '${item.article}', '${section}')">
+                                        🔊 Check Status / Play
                                     </button>
                                 </div>
-                            </div>`;
+                            </li>`;
                     });
-                    html += `</div>`;
+                    html += `</ul></div>`;
                 });
 
-                document.getElementById('resultsContainer').innerHTML = html;
+                resultsContainer.innerHTML = html;
             } catch (err) {
-                alert("API Error: Make sure the FastAPI server is running!");
+                resultsContainer.innerHTML = `<div class="alert alert-danger"> API Error: Make sure the FastAPI server is running!</div>`;
             } finally {
-                document.getElementById('loadingMsg').style.display = "none";
+                // UI State: Reset
+                generateBtn.disabled = false;
+                loadingMsg.classList.add('d-none');
             }
         }
 
-        // Tries to load the audio. If 404, tells user to wait. If 200, renders player.
+        // Tries to load the audio. Replaces alert() popups with smooth button transitions!
         async function loadAudio(btnElement, article, section) {
-            const originalText = btnElement.innerText;
-            btnElement.innerText = "Checking...";
+            const originalText = btnElement.innerHTML;
+            
+            // UI State: Checking
+            btnElement.disabled = true;
+            btnElement.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Checking...`;
             
             const audioUrl = `/audio?article=${encodeURIComponent(article)}&section=${encodeURIComponent(section)}`;
             
             try {
                 const res = await fetch(audioUrl);
+                
                 if (res.status === 404) {
-                    alert(`Still processing "${section}" in the background! \n\nSince this runs on a CPU prototype, it may take several minutes. Try again shortly.`);
-                    btnElement.innerText = originalText;
+                    // Audio not ready: Show warning badge on the button for 4 seconds
+                    btnElement.classList.replace('btn-outline-primary', 'btn-warning');
+                    btnElement.classList.remove('btn-outline-primary'); // fallback
+                    btnElement.innerHTML = `⏳ Still Processing...`;
+                    
+                    setTimeout(() => {
+                        btnElement.classList.replace('btn-warning', 'btn-outline-primary');
+                        btnElement.innerHTML = originalText;
+                        btnElement.disabled = false;
+                    }, 4000);
+
                 } else if (res.ok) {
-                    // Replace the button with an actual HTML5 Audio Player
-                    const playerDiv = document.getElementById(`player-${article}-${section}`);
-                    playerDiv.innerHTML = `<audio controls autoplay src="${audioUrl}"></audio>`;
+                    // Audio is ready: Replace the button with a full-width HTML5 Audio Player!
+                    const playerContainer = btnElement.parentElement;
+                    playerContainer.innerHTML = `<audio controls autoplay class="w-100" src="${audioUrl}"></audio>`;
                 }
             } catch (err) {
-                alert("Network error.");
-                btnElement.innerText = originalText;
+                // Network Error
+                btnElement.classList.replace('btn-outline-primary', 'btn-danger');
+                btnElement.innerHTML = ` Network Error`;
+                
+                setTimeout(() => {
+                    btnElement.classList.replace('btn-danger', 'btn-outline-primary');
+                    btnElement.innerHTML = originalText;
+                    btnElement.disabled = false;
+                }, 3000);
             }
         }
     </script>
