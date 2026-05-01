@@ -42,38 +42,65 @@ def clean_spoken_text(text: str) -> str:
     return text.strip()
 
 @app.post("/generate")
-def generate_audio(article: str):
+def generate_audio(articles: str):
     """
-    Fetches the article, cleans the text, and queues Celery tasks 
+    Accepts a single article (e.g "Earth") or a pipe-separated list of articles (e.g "Earth|Mars")
+    just like the MediaWiki action API: https://en.wikipedia.org/w/api.php?action=query&prop=info&titles=Earth|Mars
+    Fetches the article(s), cleans the text, and queues Celery tasks 
     to generate the audio asynchronously.
     """
-    page = wiki.page(article)
+    if not articles:
+        raise HTTPException(status_code=400, detail="Articles parameter cannot be empty.")
+        
+    # Split the pipe-separated string into a list and strip whitespace
+    article_titles =[a.strip() for a in articles.split('|') if a.strip()]
     
-    if not page.exists():
-        raise HTTPException(status_code=404, detail="Article not found")
+    # Remove duplicates in case a user sends "Earth|Earth"
+    article_titles = list(set(article_titles))
+    
+    results =[]
+    total_sections_queued = 0
 
-    sections_queued = 0
-
-    # Queue Lead Section
-    lead_text = clean_spoken_text(page.summary)
-    if len(lead_text) > 50:
-        generate_section_audio.delay(article=page.title, section="Lead", text=lead_text)
-        sections_queued += 1
-
-    # Queue remaining sections
-    for section in page.sections:
-        if section.title.lower() in['see also', 'references', 'external links', 'further reading', 'notes']:
+    for article_title in article_titles:
+        page = wiki.page(article_title)
+        
+        # If an article is not found, record the error and continue to the next one
+        if not page.exists():
+            results.append({
+                "article": article_title,
+                "status": "error",
+                "message": "Article not found"
+            })
             continue
-            
-        cleaned_text = clean_spoken_text(section.text)
-        if len(cleaned_text) > 50:
-            generate_section_audio.delay(article=page.title, section=section.title, text=cleaned_text)
+
+        sections_queued = 0
+
+        # Queue Lead Section
+        lead_text = clean_spoken_text(page.summary)
+        if len(lead_text) > 50:
+            generate_section_audio.delay(article=page.title, section="Lead", text=lead_text)
             sections_queued += 1
 
+        # Queue remaining sections
+        for section in page.sections:
+            if section.title.lower() in['see also', 'references', 'external links', 'further reading', 'notes']:
+                continue
+                
+            cleaned_text = clean_spoken_text(section.text)
+            if len(cleaned_text) > 50:
+                generate_section_audio.delay(article=page.title, section=section.title, text=cleaned_text)
+                sections_queued += 1
+
+        results.append({
+            "article": page.title,
+            "status": "queued",
+            "sections_queued": sections_queued
+        })
+        total_sections_queued += sections_queued
+
     return {
-        "status": "queued",
-        "article": page.title,
-        "message": f"Successfully queued {sections_queued} sections for asynchronous audio generation."
+        "message": f"Processing complete. Queued {total_sections_queued} total sections.",
+        "details": results
     }
 
 @app.get("/audio")
