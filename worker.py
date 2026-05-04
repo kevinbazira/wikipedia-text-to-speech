@@ -5,7 +5,17 @@ import numpy as np
 from celery import Celery
 
 # Initialize Celery to use local Redis as the message broker
-app = Celery('tts_worker', broker='redis://localhost:6379/0')
+local_redis_url = "redis://localhost:6379/0"
+toolforge_redis_url = "redis://redis.svc.tools.eqiad1.wikimedia.cloud:6379/0"
+app = Celery("wiki_tts", broker=toolforge_redis_url) # Toolforge Redis
+
+# IMPORTANT: Namespace tasks so they don't collide with other tools
+app.conf.update(
+    task_default_queue="wiki-tts-queue",
+    result_backend=toolforge_redis_url,
+    # This prevents our task IDs from clashing with others
+    key_prefix="wiki-tts:" 
+)
 
 # Global variable to hold the model in memory
 pipeline = None
@@ -32,6 +42,7 @@ def generate_section_audio(article: str, section: str, text: str):
     # Kokoro yields tuples of (graphemes, phonemes, audio_array)
     generator = pipe(text, voice='af_heart', speed=1.0)
     
+    """
     audio_chunks =[]
     sample_rate = 24000
     for _, _, audio in generator:
@@ -57,11 +68,30 @@ def generate_section_audio(article: str, section: str, text: str):
     
     # 3. Save as temporary WAV
     sf.write(wav_path, full_audio, samplerate=sample_rate)
+    """
     
+    # 2. Prepare File Paths
+    safe_article = article.replace(" ", "_").replace("/", "-")
+    safe_section = section.replace(" ", "_").replace("/", "-")
+    
+    output_dir = f"./audio_output/{safe_article}"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    wav_path = f"{output_dir}/{safe_section}.wav"
+    mp3_path = f"{output_dir}/{safe_section}.mp3"
+
+    # 3. Save as temporary WAV directly from generator to avoid holding large audio in memory
+    sample_rate = 24000
+    with sf.SoundFile(wav_path, mode='w', samplerate=sample_rate, channels=1) as f:
+        for _, _, audio in generator:
+            if audio is not None and len(audio) > 0:
+                f.write(audio)
+
     # 4. Convert to highly compressed MP3 using FFmpeg
     # Parameters: -ac 1 (Mono), -b:a 64k (64kbps bitrate, perfect for speech)
+    # local run uses "ffmpeg" assuming it's in PATH, toolforge uses absolute path "/data/project/wiki-tts/bin/ffmpeg"
     ffmpeg_cmd =[
-        "ffmpeg", "-y", "-i", wav_path,
+        "/data/project/wiki-tts/bin/ffmpeg", "-y", "-i", wav_path,
         "-vn", "-ar", str(sample_rate), "-ac", "1", "-b:a", "64k",
         mp3_path
     ]

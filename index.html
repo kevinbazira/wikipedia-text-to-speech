@@ -504,7 +504,7 @@
 
         if (isPolling) {
             bar.className = 'article-progress polling';
-            if (text) text.textContent = `Ready ${ready}/${total} sections · polling…`;
+            if (text) text.textContent = `Ready ${ready}/${total} sections · generating…`; /*sections · polling… is not intuitive in the UI. Changed to sections · generating…*/
         } else if (total > 0 && ready === total) {
             bar.className = 'article-progress complete';
             if (text) text.textContent = `All ${total} sections ready.`;
@@ -816,7 +816,7 @@
                     }
                 });
                 pollManager.start(jobs, articleTotals);
-                updateStatus('Polling for audio…', 'active');
+                updateStatus('Generating audio…', 'active'); /*Polling for audio… is not intuitive. Changed to Generating audio…*/
             } else {
                 updateStatus('Queued, but no sections were generated.', 'idle');
                 setProgress(0, 0);
