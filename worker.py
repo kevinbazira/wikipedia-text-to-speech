@@ -42,34 +42,6 @@ def generate_section_audio(article: str, section: str, text: str):
     # Kokoro yields tuples of (graphemes, phonemes, audio_array)
     generator = pipe(text, voice='af_heart', speed=1.0)
     
-    """
-    audio_chunks =[]
-    sample_rate = 24000
-    for _, _, audio in generator:
-        if audio is not None:
-            audio_chunks.append(audio)
-            
-    if not audio_chunks:
-        print(f"No audio generated for {section}")
-        return None
-        
-    # Stitch all sentences together into one long audio array
-    full_audio = np.concatenate(audio_chunks)
-    
-    # 2. Prepare File Paths
-    safe_article = article.replace(" ", "_").replace("/", "-")
-    safe_section = section.replace(" ", "_").replace("/", "-")
-    
-    output_dir = f"./audio_output/{safe_article}"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    wav_path = f"{output_dir}/{safe_section}.wav"
-    mp3_path = f"{output_dir}/{safe_section}.mp3"
-    
-    # 3. Save as temporary WAV
-    sf.write(wav_path, full_audio, samplerate=sample_rate)
-    """
-    
     # 2. Prepare File Paths
     safe_article = article.replace(" ", "_").replace("/", "-")
     safe_section = section.replace(" ", "_").replace("/", "-")
