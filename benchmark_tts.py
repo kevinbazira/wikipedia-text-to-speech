@@ -12,8 +12,10 @@ Usage (concurrent — simulates N users submitting at once):
 """
 
 import os
+import sys
 import time
 import subprocess
+import multiprocessing
 import numpy as np
 
 # Apply the same ONNX thread monkeypatch as the workers so the benchmark
@@ -193,20 +195,104 @@ def check_cpu():
     print(f"  Available providers: {ort.get_available_providers()}")
 
 
+def _worker_run(model_path: str, text: str, idx: int) -> dict:
+    """Run in a subprocess so each worker has its own espeak-ng + ONNX state."""
+    # Apply monkeypatch in the subprocess too
+    import onnxruntime as ort
+    _nt = int(os.environ.get("ORT_NUM_THREADS", "4"))
+    _oi = ort.InferenceSession.__init__
+    def _pi(self, *a, so=None, **kw):
+        if so is None:
+            so = ort.SessionOptions()
+        so.intra_op_num_threads = _nt
+        so.inter_op_num_threads = 1
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        _oi(self, *a, so=so, **kw)
+    ort.InferenceSession.__init__ = _pi
+
+    from kokoro_onnx import Kokoro
+    kokoro = Kokoro(model_path, "voices-v1.0.bin")
+    _ = kokoro.create("Warmup.", voice="af_heart", lang="en-us")
+
+    t0 = time.time()
+    audio, sr = kokoro.create(text, voice="af_heart", lang="en-us")
+    elapsed = time.time() - t0
+    audio_dur = len(audio) / sr
+    return {"idx": idx, "elapsed": elapsed, "audio_dur": audio_dur, "chars": len(text), "s_per_char": elapsed / len(text)}
+
+
+def bench_concurrent(model_path: str, label: str, concurrency: int):
+    """Benchmark kokoro-onnx under concurrent load using subprocesses."""
+    print(f"\n{'='*60}")
+    print(f"  CONCURRENT BENCHMARK: {concurrency}x kokoro-onnx ({label})")
+    print(f"{'='*60}")
+
+    try:
+        from kokoro_onnx import Kokoro
+    except ImportError:
+        print("  SKIP — kokoro-onnx not installed")
+        return
+
+    print(f"  Model: {model_path}")
+    print(f"  Spawning {concurrency} subprocesses (each loads model independently)")
+
+    # Give each "user" a different text slice
+    texts = [BENCHMARK_TEXT[i % len(BENCHMARK_TEXT):(i + 400) % len(BENCHMARK_TEXT)] or BENCHMARK_TEXT
+             for i in range(concurrency)]
+
+    t0 = time.time()
+    with multiprocessing.Pool(concurrency) as pool:
+        results = pool.starmap(_worker_run, [(model_path, texts[i], i) for i in range(concurrency)])
+    elapsed = time.time() - t0
+
+    total_chars = sum(r["chars"] for r in results)
+    total_audio = sum(r["audio_dur"] for r in results)
+
+    print(f"\n  Per-worker breakdown:")
+    for r in sorted(results, key=lambda x: x["idx"]):
+        print(f"    Worker {r['idx']}: {r['chars']:4d} chars → {r['elapsed']:.1f}s ({r['s_per_char']:.4f} s/char, "
+              f"RTF={r['elapsed']/r['audio_dur']:.2f}x)")
+
+    print(f"\n  Totals:")
+    print(f"    Concurrency:      {concurrency}x")
+    print(f"    Wall clock:       {elapsed:.1f}s")
+    print(f"    Total chars:      {total_chars}")
+    print(f"    Total audio:      {total_audio:.1f}s")
+    print(f"    Average s/char:   {elapsed / total_chars:.4f}")
+    print(f"    Aggregate RTF:    {elapsed / total_audio:.2f}x")
+    print(f"    Throughput:       {total_chars / elapsed:.0f} chars/s")
+    # Ideal throughput (single-user s/char × concurrency) vs actual
+    best_single = min(r["s_per_char"] for r in results)
+    ideal_throughput = concurrency / best_single
+    actual_throughput = total_chars / elapsed
+    efficiency = actual_throughput / ideal_throughput * 100
+    print(f"    Scaling efficiency: {efficiency:.0f}% (ideal=concurrency×)")
+
+
 if __name__ == "__main__":
+    concurrency = 1
+    if "--concurrent" in sys.argv:
+        idx = sys.argv.index("--concurrent")
+        concurrency = int(sys.argv[idx + 1])
+
     check_cpu()
+    print(f"\n  Benchmark mode: {'SINGLE-USER' if concurrency == 1 else f'{concurrency}-USER CONCURRENT'}")
 
     results = []
-    if (r := bench_onnx("kokoro-v1.0.onnx", "FP32")):
-        results.append(r)
-    if (r := bench_onnx("kokoro-v1.0.int8.onnx", "INT8")):
-        results.append(r)
-    if (r := bench_kpipeline()):
-        results.append(r)
+    if concurrency == 1:
+        # Standard single-request benchmarks
+        if (r := bench_onnx("kokoro-v1.0.onnx", "FP32")):
+            results.append(r)
+        if (r := bench_onnx("kokoro-v1.0.int8.onnx", "INT8")):
+            results.append(r)
+        if (r := bench_kpipeline()):
+            results.append(r)
 
-    # Summary
-    print(f"\n{'='*60}")
-    print(f"  SUMMARY (long text)")
-    print(f"{'='*60}")
-    for r in results:
-        print(f"  {r['backend']:20s}  {r['long_s_per_char']:.4f} s/char  RTF={r['long_rtf']:.2f}x")
+        print(f"\n{'='*60}")
+        print(f"  SUMMARY (long text)")
+        print(f"{'='*60}")
+        for r in results:
+            print(f"  {r['backend']:20s}  {r['long_s_per_char']:.4f} s/char  RTF={r['long_rtf']:.2f}x")
+    else:
+        # Concurrent benchmark: ONNX FP32 only (best backend)
+        bench_concurrent("kokoro-v1.0.onnx", "FP32", concurrency)
