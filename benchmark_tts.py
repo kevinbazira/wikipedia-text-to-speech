@@ -4,13 +4,37 @@ TTS backend benchmark: Kokoro-ONNX (INT8 & FP32) vs Kokoro KPipeline (PyTorch).
 Measures time-per-character and real-time factor (RTF) on identical input,
 so we can identify which backend is fastest on this hardware.
 
-Usage:
-    python3 benchmark_tts.py
+Usage (single-request latency):
+    OMP_NUM_THREADS=1 ORT_NUM_THREADS=<N> python3 benchmark_tts.py
+
+Usage (concurrent — simulates N users submitting at once):
+    OMP_NUM_THREADS=1 ORT_NUM_THREADS=<N> python3 benchmark_tts.py --concurrent <N>
 """
 
+import os
 import time
 import subprocess
 import numpy as np
+
+# Apply the same ONNX thread monkeypatch as the workers so the benchmark
+# reflects real deployment performance, not thread-thrashing artefacts.
+# Set ORT_NUM_THREADS to control (default 4 is a safe balance).
+import onnxruntime as ort
+
+_NUM_THREADS = int(os.environ.get("ORT_NUM_THREADS", "4"))
+_original_init = ort.InferenceSession.__init__
+
+
+def _patched_init(self, path_or_bytes, sess_options=None, providers=None, provider_options=None, **kwargs):
+    if sess_options is None:
+        sess_options = ort.SessionOptions()
+    sess_options.intra_op_num_threads = _NUM_THREADS
+    sess_options.inter_op_num_threads = 1
+    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    _original_init(self, path_or_bytes, sess_options, providers, provider_options, **kwargs)
+
+
+ort.InferenceSession.__init__ = _patched_init
 
 BENCHMARK_TEXT = (
     "Earth is the third planet from the Sun and the only astronomical object "
