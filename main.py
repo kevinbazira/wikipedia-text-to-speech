@@ -145,32 +145,42 @@ def _queue_missing_sections(article_title: str) -> dict:
 
     sections_queued = 0
     section_names = []
+    all_sections = []
 
     # Check Lead
-    if not audio_exists("Lead"):
+    lead_exists = audio_exists("Lead")
+    if lead_exists:
+        all_sections.append({"name": "Lead", "status": "exists"})
+    else:
         lead_text = clean_spoken_text(page.summary)
         if len(lead_text) > 50:
             generate_section_audio.delay(article=page.title, section="Lead", text=lead_text)
             sections_queued += 1
             section_names.append("Lead")
+            all_sections.append({"name": "Lead", "status": "queued"})
 
     # Check remaining sections
     for section in page.sections:
         if section.title.lower() in ['see also', 'references', 'external links', 'further reading', 'notes']:
             continue
 
-        if not audio_exists(section.title):
+        sec_exists = audio_exists(section.title)
+        if sec_exists:
+            all_sections.append({"name": section.title, "status": "exists"})
+        else:
             cleaned_text = clean_spoken_text(section.text)
             if len(cleaned_text) > 50:
                 generate_section_audio.delay(article=page.title, section=section.title, text=cleaned_text)
                 sections_queued += 1
                 section_names.append(section.title)
+                all_sections.append({"name": section.title, "status": "queued"})
 
     return {
         "article": page.title,
         "status": "queued" if sections_queued > 0 else "already_exists",
         "sections_queued": sections_queued,
-        "section_names": section_names
+        "section_names": section_names,
+        "sections": all_sections
     }
 
 def _fetch_single_section_text(article_title: str, section_title: str) -> tuple[str | None, str | None]:

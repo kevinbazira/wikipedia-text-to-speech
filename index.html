@@ -654,13 +654,15 @@
     function buildJobList(data) {
         const jobs = [];
         data.details.forEach(item => {
-            if (item.status !== 'error' && Array.isArray(item.section_names)) {
-                item.section_names.forEach(section => {
-                    jobs.push({
-                        article: item.article,
-                        section: section,
-                        id: actionId(item.article, section)
-                    });
+            if (item.status !== 'error' && Array.isArray(item.sections)) {
+                item.sections.forEach(sec => {
+                    if (sec.status === 'queued') {
+                        jobs.push({
+                            article: item.article,
+                            section: sec.name,
+                            id: actionId(item.article, sec.name)
+                        });
+                    }
                 });
             }
         });
@@ -820,16 +822,25 @@
             const jobs = buildJobList(data);
             if (jobs.length > 0) {
                 const articleTotals = {};
+                const initialReadyPerArticle = {};
                 data.details.forEach(d => {
-                    if (d.status !== 'error' && Array.isArray(d.section_names)) {
-                        articleTotals[d.article] = d.section_names.length;
+                    if (d.status !== 'error' && Array.isArray(d.sections)) {
+                        articleTotals[d.article] = d.sections.length;
+                        const existing = d.sections.filter(s => s.status === 'exists').length;
+                        initialReadyPerArticle[d.article] = existing;
                     }
                 });
-                pollManager.start(jobs, articleTotals);
-                updateStatus('Generating audio…', 'active'); /*Polling for audio… is not intuitive. Changed to Generating audio…*/
+                pollManager.start(jobs, articleTotals, initialReadyPerArticle);
+                updateStatus('Generating audio…', 'active');
             } else {
-                updateStatus('Queued, but no sections were generated.', 'idle');
-                setProgress(0, 0);
+                // All sections already exist — show ready state
+                updateStatus('All sections ready.', 'success');
+                data.details.forEach(d => {
+                    if (Array.isArray(d.sections)) {
+                        updateArticleProgress(d.article, d.sections.length, d.sections.length, false);
+                    }
+                });
+                setProgress(1, 1);
             }
         } catch (err) {
             updateStatus(`Error: ${err.message}. Make sure the FastAPI server is running.`, 'error');
@@ -854,7 +865,7 @@
             title.textContent = item.article;
             header.appendChild(title);
 
-            if (item.status !== 'error' && Array.isArray(item.section_names) && item.section_names.length > 0) {
+            if (item.status !== 'error' && Array.isArray(item.sections) && item.sections.length > 0) {
                 const refreshBtn = document.createElement('button');
                 refreshBtn.className = 'btn btn-quiet btn-sm';
                 refreshBtn.type = 'button';
@@ -866,12 +877,13 @@
             group.appendChild(header);
 
             // Per-article progress bar
-            if (item.status !== 'error' && Array.isArray(item.section_names) && item.section_names.length > 0) {
+            if (item.status !== 'error' && Array.isArray(item.sections) && item.sections.length > 0) {
                 const progress = document.createElement('div');
                 progress.className = 'article-progress';
                 progress.id = 'article-progress-' + slugify(item.article);
+                const existingCount = item.sections.filter(s => s.status === 'exists').length;
                 progress.innerHTML = `
-                    <span class="article-progress-text">Queued ${item.section_names.length} sections.</span>
+                    <span class="article-progress-text">${existingCount} ready · ${item.sections.length - existingCount} queued</span>
                     <div class="progress-track">
                         <div class="progress-fill" style="width:0%"></div>
                     </div>
@@ -889,23 +901,27 @@
                 err.style.color = 'var(--color-danger)';
                 err.innerHTML = `<strong>Error:</strong> ${escapeHtml(item.message)}`;
                 panel.appendChild(err);
-            } else if (Array.isArray(item.section_names)) {
-                item.section_names.forEach((section, idx) => {
+            } else if (Array.isArray(item.sections)) {
+                item.sections.forEach((sec, idx) => {
                     const row = document.createElement('div');
                     row.className = 'section-row';
                     row.dataset.article = item.article;
-                    row.dataset.section = section;
-                    if (idx === item.section_names.length - 1) row.style.borderBottom = 'none';
+                    row.dataset.section = sec.name;
+                    if (idx === item.sections.length - 1) row.style.borderBottom = 'none';
 
                     const name = document.createElement('span');
                     name.className = 'section-name';
-                    name.textContent = section;
+                    name.textContent = sec.name;
 
                     const action = document.createElement('div');
                     action.className = 'section-action';
-                    action.id = actionId(item.article, section);
+                    action.id = actionId(item.article, sec.name);
 
-                    renderActionButton(action, item.article, section);
+                    if (sec.status === 'exists') {
+                        renderPlayer(action, `/audio?article=${encodeURIComponent(item.article)}&section=${encodeURIComponent(sec.name)}`);
+                    } else {
+                        renderActionButton(action, item.article, sec.name);
+                    }
 
                     row.appendChild(name);
                     row.appendChild(action);
@@ -931,14 +947,16 @@
             const jobs = buildJobList(saved);
             if (jobs.length > 0) {
                 const articleTotals = {};
+                const readyPerArticleFromStatus = {};
                 saved.details.forEach(d => {
-                    if (d.status !== 'error' && Array.isArray(d.section_names)) {
-                        articleTotals[d.article] = d.section_names.length;
+                    if (d.status !== 'error' && Array.isArray(d.sections)) {
+                        articleTotals[d.article] = d.sections.length;
+                        readyPerArticleFromStatus[d.article] = d.sections.filter(s => s.status === 'exists').length;
                     }
                 });
 
                 const results = await Promise.allSettled(jobs.map(silentCheck));
-                const readyPerArticle = {};
+                const readyPerArticle = {...readyPerArticleFromStatus};
                 const pending = [];
 
                 results.forEach((r, i) => {
@@ -961,6 +979,9 @@
                     setProgress(totalSections, totalSections);
                     updateStatus('All sections ready.', 'success');
                 }
+            } else if (saved && saved.details && saved.details.some(d => Array.isArray(d.sections) && d.sections.length > 0)) {
+                // All existed already on load — show ready state
+                updateStatus('All sections ready.', 'success');
             }
         }
         els.input.focus();
