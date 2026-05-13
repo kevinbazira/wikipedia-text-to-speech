@@ -599,14 +599,19 @@
             } else if (container) {
                 try {
                     const res = await fetch(`/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
-                    if (res.ok && res.status !== 404) {
+
+                    // NEW: Explicitly handle 200 vs 202
+                    if (res.status === 200) {
                         if (!container.querySelector('audio')) {
                             renderPlayer(container, `/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
                         }
                         this.ready[job.article] = (this.ready[job.article] || 0) + 1;
-                    } else {
+                    } else if (res.status === 202) {
                         job.retries++;
                         if (job.retries < MAX_RETRIES) this.jobs.push(job);
+                    } else {
+                        // 404 or other network error: drop the job to prevent infinite polling
+                        renderNetworkError(container, job.article, job.section, 'Not found');
                     }
                 } catch (e) {
                     job.retries++;
@@ -710,11 +715,11 @@
         container.appendChild(audio);
     }
 
-    function renderNetworkError(container, article, section) {
+    function renderNetworkError(container, article, section, customMsg = 'Network error') {
         container.innerHTML = '';
         const badge = document.createElement('span');
         badge.className = 'badge badge-error';
-        badge.textContent = 'Network error';
+        badge.textContent = customMsg;
 
         const retry = document.createElement('button');
         retry.className = 'btn btn-text btn-sm';
@@ -733,12 +738,17 @@
 
         try {
             const res = await fetch(url);
-            if (res.status === 404) {
+
+            // NEW: Explicitly handle 202 vs 200 vs 404
+            if (res.status === 202) {
                 renderProcessingState(container, article, section);
                 return {ready: false};
-            } else if (res.ok) {
+            } else if (res.status === 200) {
                 renderPlayer(container, url);
                 return {ready: true};
+            } else if (res.status === 404) {
+                renderNetworkError(container, article, section, 'Not Found');
+                return {ready: false, error: true};
             } else {
                 throw new Error('Status ' + res.status);
             }
@@ -770,7 +780,7 @@
         if (!container || container.querySelector('audio')) return {ready: true};
         try {
             const res = await fetch(`/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
-            if (res.ok && res.status !== 404) {
+            if (res.status === 200) {
                 renderPlayer(container, `/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
                 return {ready: true};
             }
