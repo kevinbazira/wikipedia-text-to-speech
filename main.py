@@ -135,6 +135,36 @@ def clean_spoken_text(text: str) -> str:
 
     return text.strip()
 
+# ── Wikipedia API Traversal Helpers ───────────────────────────────────────────
+
+def get_valid_sections(sections) -> list:
+    """
+    Recursively extracts all sections and subsections (h2, h3, h4...),
+    skipping blocklisted metadata sections and their children.
+    """
+    valid = []
+    blocklist = ['see also', 'references', 'external links', 'further reading', 'notes']
+    for s in sections:
+        if s.title.lower() in blocklist:
+            continue
+        valid.append(s)
+        valid.extend(get_valid_sections(s.sections))
+    return valid
+
+
+def find_section_by_title(sections, target_title: str):
+    """
+    Recursively searches the section tree for a specific title.
+    """
+    for s in sections:
+        if s.title == target_title:
+            return s
+        found = find_section_by_title(s.sections, target_title)
+        if found:
+            return found
+    return None
+
+
 # ── Core Logic Helpers ────────────────────────────────────────────────────────
 
 def _queue_missing_sections(article_title: str) -> dict:
@@ -180,11 +210,8 @@ def _queue_missing_sections(article_title: str) -> dict:
     else:
         try_queue_task("Lead", page.summary)
 
-    # Check remaining sections
-    for section in page.sections:
-        if section.title.lower() in ['see also', 'references', 'external links', 'further reading', 'notes']:
-            continue
-
+    # Check remaining sections (recursive: h2, h3, h4...)
+    for section in get_valid_sections(page.sections):
         sec_exists = audio_exists(section.title)
         if sec_exists:
             all_sections.append({"name": section.title, "status": "exists"})
@@ -212,7 +239,7 @@ def _fetch_single_section_text(article_title: str, section_title: str) -> tuple[
     if section_title == "Lead":
         text = page.summary
     else:
-        section = next((s for s in page.sections if s.title == section_title), None)
+        section = find_section_by_title(page.sections, section_title)
         if section is None:
             return None, f"Section '{section_title}' not found"
         text = section.text
