@@ -1,7 +1,8 @@
 import os
 import re
+import redis
 import wikipediaapi
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from worker import generate_section_audio
@@ -20,6 +21,15 @@ app.add_middleware(
 # Initialize Wikipedia API
 user_agent = "WMF ML Team TTS model-server (LiftWing)"
 wiki = wikipediaapi.Wikipedia(user_agent, "en")
+
+# Initialize Redis client for distributed locking
+if os.path.exists("/data/project/wiki-tts"):
+    # toolforge
+    redis_url = "redis://redis.svc.tools.eqiad1.wikimedia.cloud:6379/0"
+else:
+    # ml-lab
+    redis_url = "redis://localhost:6379/0"
+redis_client = redis.from_url(redis_url)
 
 # ── Number-to-words helpers ──────────────────────────────────────────────────
 
@@ -147,17 +157,28 @@ def _queue_missing_sections(article_title: str) -> dict:
     section_names = []
     all_sections = []
 
+    def try_queue_task(sec_title: str, raw_text: str) -> None:
+        """Atomically check and queue via Redis lock to prevent duplicate tasks."""
+        nonlocal sections_queued
+        all_sections.append({"name": sec_title, "status": "queued"})
+        section_names.append(sec_title)
+
+        lock_key = f"wiki-tts:lock:{safe_article}:{sec_title}"
+        if redis_client.setnx(lock_key, "1"):
+            redis_client.expire(lock_key, 1800)
+            cleaned = clean_spoken_text(raw_text)
+            if len(cleaned) > 50:
+                generate_section_audio.delay(article=page.title, section=sec_title, text=cleaned)
+                sections_queued += 1
+            else:
+                redis_client.delete(lock_key)
+
     # Check Lead
     lead_exists = audio_exists("Lead")
     if lead_exists:
         all_sections.append({"name": "Lead", "status": "exists"})
     else:
-        lead_text = clean_spoken_text(page.summary)
-        if len(lead_text) > 50:
-            generate_section_audio.delay(article=page.title, section="Lead", text=lead_text)
-            sections_queued += 1
-            section_names.append("Lead")
-            all_sections.append({"name": "Lead", "status": "queued"})
+        try_queue_task("Lead", page.summary)
 
     # Check remaining sections
     for section in page.sections:
@@ -168,12 +189,7 @@ def _queue_missing_sections(article_title: str) -> dict:
         if sec_exists:
             all_sections.append({"name": section.title, "status": "exists"})
         else:
-            cleaned_text = clean_spoken_text(section.text)
-            if len(cleaned_text) > 50:
-                generate_section_audio.delay(article=page.title, section=section.title, text=cleaned_text)
-                sections_queued += 1
-                section_names.append(section.title)
-                all_sections.append({"name": section.title, "status": "queued"})
+            try_queue_task(section.title, section.text)
 
     return {
         "article": page.title,
@@ -266,19 +282,22 @@ def get_audio(article: str, section: str):
             filename=f"{safe_section}.mp3"
         )
 
-    # File doesn't exist — fetch text and queue async generation
-    text, error = _fetch_single_section_text(article, section)
-    if text is None:
-        raise HTTPException(status_code=404, detail=error)
-
-    generate_section_audio.delay(article=article, section=section, text=text)
+    # File doesn't exist — atomically check Redis lock before queueing
+    lock_key = f"wiki-tts:lock:{safe_article}:{safe_section}"
+    if redis_client.setnx(lock_key, "1"):
+        redis_client.expire(lock_key, 1800)
+        text, error = _fetch_single_section_text(article, section)
+        if text is None:
+            redis_client.delete(lock_key)
+            raise HTTPException(status_code=404, detail=error)
+        generate_section_audio.delay(article=article, section=section, text=text)
 
     return JSONResponse(
-        status_code=202,
+        status_code=status.HTTP_202_ACCEPTED,
         content={
             "article": article,
             "section": section,
-            "status": "queued",
-            "message": f"Audio generation queued for {article} - {section}."
+            "status": "processing",
+            "message": f"Audio for '{article}' - '{section}' is generating."
         }
     )
