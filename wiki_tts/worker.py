@@ -6,51 +6,46 @@ from celery import Celery
 from celery.signals import worker_process_init
 import onnxruntime as ort
 
-# Initialize Celery to use Redis as the message broker
-local_redis_url = "redis://localhost:6379/0"
-toolforge_redis_url = "redis://redis.svc.tools.eqiad1.wikimedia.cloud:6379/0"
-app = Celery("wiki_tts", broker=toolforge_redis_url)
-
-# Namespace tasks so they don't collide with other tools
-app.conf.update(
-    task_default_queue="wiki-tts-queue",
-    result_backend=toolforge_redis_url,
-    key_prefix="wiki-tts:",
+from wiki_tts.config import (
+    CELERY_BROKER_URL,
+    CELERY_RESULT_BACKEND,
+    CELERY_TASK_DEFAULT_QUEUE,
+    CELERY_KEY_PREFIX,
+    ORT_NUM_THREADS,
+    AUDIO_OUTPUT_DIR,
+    MODEL_FILE,
+    VOICES_FILE,
+    FFMPEG_PATH,
 )
 
-# Global variable to hold the ONNX model in memory
-kokoro_model = None
+# ── Celery app ───────────────────────────────────────────────────────────────
+app = Celery("wiki_tts", broker=CELERY_BROKER_URL)
+app.conf.update(
+    task_default_queue=CELERY_TASK_DEFAULT_QUEUE,
+    result_backend=CELERY_RESULT_BACKEND,
+    key_prefix=CELERY_KEY_PREFIX,
+)
 
-# ---------------------------------------------------------------------------
-# ONNX Runtime threading
-#
-# Set ORT_NUM_THREADS per environment:
-#   Toolforge --cpu 1:         1
-#   Toolforge --cpu 2:         2
-#   Local dev:                 4
-# ---------------------------------------------------------------------------
-NUM_THREADS = int(os.environ.get("ORT_NUM_THREADS", "1"))
-
+# ── ONNX Runtime threading patch ─────────────────────────────────────────────
 original_init = ort.InferenceSession.__init__
 
 
 def patched_init(self, path_or_bytes, sess_options=None, providers=None, provider_options=None, **kwargs):
     if sess_options is None:
         sess_options = ort.SessionOptions()
-
-    sess_options.intra_op_num_threads = NUM_THREADS
+    sess_options.intra_op_num_threads = ORT_NUM_THREADS
     sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
     original_init(self, path_or_bytes, sess_options, providers, provider_options, **kwargs)
 
 
 ort.InferenceSession.__init__ = patched_init
 
-# ---------------------------------------------------------------------------
-# Text chunking (linear vocoder bottleneck, but chunking reduces per-call
-# memory pressure for very long sections)
-# ---------------------------------------------------------------------------
+# ─── Global model reference ──────────────────────────────────────────────────
+kokoro_model = None
+
+
+# ── Text chunking ─────────────────────────────────────────────────────────────
 
 def _split_text(text: str, max_chars: int = 800) -> list[str]:
     if len(text) <= max_chars:
@@ -105,22 +100,17 @@ def _crossfade(a: np.ndarray, b: np.ndarray, fade_len: int = 120) -> np.ndarray:
     return np.concatenate([amp[:-fade_len], amp[-fade_len:] + bmp[:fade_len], bmp[fade_len:]])
 
 
-# ---------------------------------------------------------------------------
-# Model initialisation (pre-loaded at worker start)
-# ---------------------------------------------------------------------------
+# ── Model initialisation ─────────────────────────────────────────────────────
 
 @worker_process_init.connect
 def init_worker(**kwargs):
     global kokoro_model
     print("Pre-loading Kokoro-ONNX FP32 model into memory...")
     from kokoro_onnx import Kokoro
-    # FP32 is faster than INT8 on CPUs without VNNI instructions
-    kokoro_model = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
+    kokoro_model = Kokoro(MODEL_FILE, VOICES_FILE)
 
 
-# ---------------------------------------------------------------------------
-# Task
-# ---------------------------------------------------------------------------
+# ── Task ──────────────────────────────────────────────────────────────────────
 
 @app.task
 def generate_section_audio(article: str, section: str, text: str):
@@ -131,12 +121,11 @@ def generate_section_audio(article: str, section: str, text: str):
     safe_article = article.replace(" ", "_").replace("/", "-")
     safe_section = section.replace(" ", "_").replace("/", "-")
 
-    output_dir = f"./audio_output/{safe_article}"
+    output_dir = f"{AUDIO_OUTPUT_DIR}/{safe_article}"
     os.makedirs(output_dir, exist_ok=True)
 
     mp3_path = f"{output_dir}/{safe_section}.mp3"
 
-    # Generate audio with text chunking
     chunks = _split_text(text, max_chars=800)
 
     if len(chunks) == 1:
@@ -156,11 +145,10 @@ def generate_section_audio(article: str, section: str, text: str):
         for part in audio_parts[1:]:
             audio_array = _crossfade(audio_array, part, fade_len=120)
 
-    # Pipe audio directly to FFmpeg (no intermediate WAV file)
     ffmpeg_cmd = [
-        "/data/project/wiki-tts/bin/ffmpeg", "-y",
+        FFMPEG_PATH, "-y",
         "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
-        "-vn", "-b:a", "64k", mp3_path
+        "-vn", "-b:a", "64k", mp3_path,
     ]
 
     process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)

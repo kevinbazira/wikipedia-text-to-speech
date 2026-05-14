@@ -1,0 +1,29 @@
+# Generated audio
+audio_output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+
+# Kokoro model files (downloaded separately)
+kokoro-*.onnx
+voices-*.bin
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env

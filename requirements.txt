@@ -1,0 +1,23 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]
+a2wsgi
+
+# TTS
+kokoro>=0.9.0
+soundfile
+
+# Worker
+celery>=5.4.0
+redis>=5.0.0
+hiredis>=3.0.0
+numpy>=1.26.0
+
+# Wikipedia
+wikipedia-api>=0.8.0
+
+# ONNX Runtime (pinned for stability)
+onnxruntime>=1.20.0,<1.22.0
+
+# Dev / Benchmark
+py-cpuinfo
