@@ -1,123 +1,130 @@
-# Wikipedia TTS Service
+# Wikipedia TTS Prototype (wiki-tts)
 
-Text-to-Speech prototype for Wikipedia articles using Kokoro-82M via Kokoro-ONNX.
-Built with **FastAPI**, **Celery**, **Redis**, and **Kokoro-ONNX**.
+A Text-to-Speech (TTS) prototype that fetches Wikipedia articles, cleans the text (removes citation brackets, edit tags, etc), splits content by section, and generates .mp3 files asynchronously. 
 
-## Project Structure
+## Architecture
 
-```
-wiki-tts/
-├── app.py                          # uWSGI entry point (ASGIMiddleware wrapper)
-├── uwsgi.ini                       # uWSGI configuration
-├── requirements.txt                # Python dependencies
-├── .gitignore
-├── wiki_tts/                  # Main application package
-│   ├── __init__.py
-│   ├── config.py                   # Environment-based configuration
-│   ├── text.py                     # Text normalization (numbers, citations, etc.)
-│   ├── wikipedia_utils.py          # Wikipedia section traversal helpers
-│   ├── locking.py                  # Redis distributed lock helpers
-│   ├── routes.py                   # FastAPI app and API endpoints
-│   ├── worker.py                   # Celery app and TTS generation task
-│   └── static/
-│       └── index.html              # Frontend UI
-├── scripts/                        # (optional) Benchmark / utility scripts
-├── tests/                          # (optional) Test suite
-│   ├── __init__.py
-│   └── test_text.py
-└── audio_output/                   # Generated MP3 files
+Below is how the prototype works on Toolforge:
+![Wikipedia TTS prototype architecture](assets/Wikipedia%20TTS%20prototype%20architecture.jpg)
+
+## Toolforge Deployment
+
+### 1. SSH into Toolforge and clone the repo
+Log into the Toolforge, assume the tool account, and pull the source code.
+```bash
+$ ssh YOUR_USERNAME@login.toolforge.org
+$ become wiki-tts
+
+# Create the web directory and clone the repo
+$ mkdir -p ~/www/python/src
+$ git clone https://gitlab.wikimedia.org/toolforge-repos/wiki-tts.git ~/www/python/src
+$ cd ~/www/python/src
 ```
 
-## Deployment (Toolforge)
+### 2. Install dependencies
 
-### STEP 1: SSH into Toolforge and clone the repo
+#### 2.1. FFmpeg (system dependency)
+To compress audio to `.mp3` in a restricted Toolforge Linux environment without `sudo`, we use a static binary for FFmpeg.
+```bash
+# Navigate to local bin (create it if missing)
+$ mkdir -p ~/bin && cd ~/bin
 
-```shell
-ssh YOUR_USERNAME@login.toolforge.org
-become wiki-tts
-git clone https://github.com/YOUR_ORG/wiki-tts.git ~/www/python/src
-cd ~/www/python/src
+# Download the latest FFmpeg amd64 static build
+$ wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+
+# Unpack the archive and move binaries to ~/bin
+$ tar xvf ffmpeg-release-amd64-static.tar.xz
+$ cp ffmpeg-*-amd64-static/ffmpeg ~/bin/
+$ cp ffmpeg-*-amd64-static/ffprobe ~/bin/
+
+# Make them executable and clean up
+$ chmod +x ~/bin/ffmpeg ~/bin/ffprobe
+$ rm -rf ffmpeg-*-amd64-static*
+
+# Confirm successful installation
+$ ~/bin/ffmpeg -version
 ```
 
-### STEP 2: Install dependencies
+#### 2.2. Python environment
+Build the virtual environment inside the Toolforge web shell to ensure C-extensions (like ONNX and hiredis) compile against the correct target OS.
+```bash
+$ toolforge webservice python3.11 shell
+$ cd ~/www/python/src
+$ python3 -m venv ~/www/python/venv
+$ source ~/www/python/venv/bin/activate
 
-#### 2.1 FFmpeg (static binary)
-
-```shell
-mkdir -p ~/bin && cd ~/bin
-wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
-tar xvf ffmpeg-release-amd64-static.tar.xz
-cp ffmpeg-*-amd64-static/ffmpeg ~/bin/
-cp ffmpeg-*-amd64-static/ffprobe ~/bin/
-chmod +x ~/bin/ffmpeg ~/bin/ffprobe
-rm -rf ffmpeg-*-amd64-static*
-ffmpeg -version
+# Install dependencies from requirements
+$ pip install --upgrade pip wheel
+$ pip install -r requirements.txt
+$ exit
 ```
 
-#### 2.2 Python environment
+#### 2.3. Download Kokoro TTS model
 
-```shell
-toolforge webservice python3.11 shell
-python3 -m venv ~/www/python/venv
-source ~/www/python/venv/bin/activate
-pip install --upgrade pip wheel
-pip install -r ~/www/python/src/requirements.txt
-exit
+Download the optimized Kokoro ONNX model and voice profiles directly into the `src` directory.
+```bash
+$ cd ~/www/python/src
+$ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+$ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 ```
 
-#### 2.3 Download the Kokoro model
+### 3. Redis Message Broker
+The Celery queue relies on [Toolforge's shared Redis](https://wikitech.wikimedia.org/wiki/Help:Toolforge/Redis). No setup is required. Connection is handled automatically via `redis.svc.tools.eqiad1.wikimedia.cloud:6379`.
 
-Place `kokoro-v1.0.onnx` and `voices-v1.0.bin` in the repo root (`~/www/python/src/`).
+### 4. Start Celery workers
+Start the background inference workers as a continuous Toolforge job. This spans 10 replicas, pinned to 1 CPU thread each, to prevent CPU thrashing and ensure fast parallel generation. (see [T425804#11914308](https://phabricator.wikimedia.org/T425804#11914308))
+```bash
+$ cd ~/www/python/src
+$ toolforge jobs run celery-worker \
+--command "export ORT_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && cd ~/www/python/src && ~/www/python/venv/bin/celery -A wiki_tts.worker worker --pool solo --loglevel=info" \
+--image python3.11 \
+--continuous \
+--replicas 10 \
+--mem 2Gi \
+--cpu 1
 
-### STEP 3: Start the Celery worker
-
-```shell
-toolforge jobs run celery-worker \
-  --command "export ORT_NUM_THREADS=1 && cd ~/www/python/src && ~/www/python/venv/bin/celery -A wiki_tts.worker worker --pool solo --loglevel=info" \
-  --image python3.11 \
-  --continuous \
-  --replicas 4 \
-  --mem 2Gi \
-  --cpu 1
+# Confirm the workers are running
+$ toolforge jobs list
+# Verify all replicas are running. This gives richer status than the jobs list (e.g OOM kills, CrashLoopBackOff, etc)
+$ kubectl get pods
 ```
 
-> **Note:** If upgrading from the old flat structure, stop any old worker (`toolforge jobs stop celery-worker`) and start this one — the module path changed from `worker` to `wiki_tts.worker`.
+### 5. Start TTS service
+Launch the FastAPI application using Toolforge's webservice router.
+```bash
+$ cd ~/www/python/src
+$ toolforge webservice python3.11 start
 
-### STEP 4: Start the web service
-
-```shell
-toolforge webservice python3.11 start
+# Confirm the web service is running
+$ toolforge webservice status
 ```
 
-### STEP 5: Usage
+### 6. Interacting with the service
 
-```shell
-# Download MP3 if it exists (HTTP 200)
-curl -OJ "https://wiki-tts.toolforge.org/audio?article=Earth&section=Lead"
+#### 6.1. Programmatically via cURL
+The primary endpoint that the Apps team will be hitting serves the .mp3 if it exists, or queues it and returns a `202 Accepted` status if missing.
+```bash
+# File exists returns HTTP 200 and downloads the .mp3 with the original filename.
+$ curl -OJ "https://wiki-tts.toolforge.org/audio?article=Earth&section=Lead"
 
-# Queue missing sections for one or more articles (HTTP 200)
-curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth|Mars"
+# File missing returns HTTP 202 instead of 404, queues section generation, and returns JSON status.
+$ curl -w "\nHTTP Status: %{http_code}\n" "https://wiki-tts.toolforge.org/audio?article=Earth&section=Atmosphere"
+
+# Section not found returns HTTP 404 with "Section 'FakeSection' not found".
+$ curl -w "\nHTTP Status: %{http_code}\n" "https://wiki-tts.toolforge.org/audio?article=Earth&section=FakeSection"
+
+# Article not found returns HTTP 404 with "Article 'NonExistent' not found".
+$ curl -w "\nHTTP Status: %{http_code}\n" "https://wiki-tts.toolforge.org/audio?article=NonExistent&section=Lead"
+
+# Generate missing sections of an article.
+$ curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth"
+
+# Generate missing sections of multiple articles using a pipe-separated list just like the MediaWiki action API: https://en.wikipedia.org/w/api.php?action=query&prop=info&titles=Earth|Mars
+$ curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth|Mars"
 ```
 
-Visit https://wiki-tts.toolforge.org/ in your browser.
-API docs at https://wiki-tts.toolforge.org/docs.
+#### 6.2. Visually via the browser
+* **Prototype UI:** [https://wiki-tts.toolforge.org/](https://wiki-tts.toolforge.org/)
+* **API Documentation:** [https://wiki-tts.toolforge.org/docs](https://wiki-tts.toolforge.org/docs)
+* **Prototype Demo:** ![▶️ Watch the demo](assets/Wikipedia%20TTS%20prototype%20demo.mp4)
 
-## Local development
-
-```shell
-# Start Redis
-redis-server
-
-# Start the worker (in terminal 1)
-celery -A wiki_tts.worker worker --pool solo --loglevel=info
-
-# Start FastAPI (in terminal 2)
-uvicorn wiki_tts.routes:app --reload --port 8000
-```
-
-## Tests
-
-```shell
-pip install pytest
-pytest tests/
-```

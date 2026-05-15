@@ -27,5 +27,5 @@ MODEL_FILE = "kokoro-v1.0.onnx"
 VOICES_FILE = "voices-v1.0.bin"
 
 TOOLFORGE_FFMPEG = "/data/project/wiki-tts/bin/ffmpeg"
-SYSTEM_FFMPEG = "ffmpeg"
-FFMPEG_PATH = TOOLFORGE_FFMPEG if IS_TOOLFORGE else SYSTEM_FFMPEG
+LOCAL_FFMPEG = "ffmpeg"
+FFMPEG_PATH = TOOLFORGE_FFMPEG if IS_TOOLFORGE else LOCAL_FFMPEG
