@@ -1,13 +1,14 @@
 import os
+
 import wikipediaapi
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from wiki_tts.config import AUDIO_OUTPUT_DIR, MIN_TEXT_LENGTH
-from wiki_tts.text import clean_spoken_text
-from wiki_tts.wikipedia_utils import get_valid_sections, find_section_by_title
 from wiki_tts.locking import acquire_lock, release_lock
+from wiki_tts.text import clean_spoken_text
+from wiki_tts.wikipedia_utils import find_section_by_title, get_valid_sections
 from wiki_tts.worker import generate_section_audio
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ wiki = wikipediaapi.Wikipedia(user_agent, "en")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _audio_path(article: str, section: str) -> str:
     safe_article = article.replace(" ", "_").replace("/", "-")
@@ -110,13 +112,15 @@ def _fetch_single_section_text(article_title: str, section_title: str) -> tuple[
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @app.get("/", response_class=HTMLResponse)
 def serve_ui():
     """Serve the frontend."""
     import wiki_tts
+
     pkg_dir = os.path.dirname(wiki_tts.__file__)
     index_path = os.path.join(pkg_dir, "static", "index.html")
-    with open(index_path, "r", encoding="utf-8") as f:
+    with open(index_path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -129,7 +133,7 @@ def generate_audio(articles: str):
     if not articles:
         raise HTTPException(status_code=400, detail="Articles parameter cannot be empty.")
 
-    article_titles = [a.strip() for a in articles.split('|') if a.strip()]
+    article_titles = [a.strip() for a in articles.split("|") if a.strip()]
     article_titles = list(set(article_titles))
 
     results = []

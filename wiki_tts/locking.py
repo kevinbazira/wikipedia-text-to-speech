@@ -1,5 +1,6 @@
 import redis
-from wiki_tts.config import REDIS_URL, LOCK_TTL
+
+from wiki_tts.config import LOCK_TTL, REDIS_URL
 
 redis_client = redis.from_url(REDIS_URL)
 

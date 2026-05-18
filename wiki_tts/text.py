@@ -69,9 +69,9 @@ def _norm_numbers(text: str) -> str:
     def _replace_int(m: re.Match) -> str:
         return _int_to_words(int(m.group(0)))
 
-    text = re.sub(r'(\d+)\.(\d+)(%)?', _replace_decimal, text)
-    text = re.sub(r'(?<!\d)(\d+)%', _replace_int_percent, text)
-    text = re.sub(r'(?<!\d)(\d+)(?!\.\d)', _replace_int, text)
+    text = re.sub(r"(\d+)\.(\d+)(%)?", _replace_decimal, text)
+    text = re.sub(r"(?<!\d)(\d+)%", _replace_int_percent, text)
+    text = re.sub(r"(?<!\d)(\d+)(?!\.\d)", _replace_int, text)
     return text
 
 
@@ -80,9 +80,9 @@ def clean_spoken_text(text: str) -> str:
     if not text:
         return ""
 
-    text = re.sub(r'\[\d+\]', '', text)
-    text = re.sub(r'\[edit\]', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\(/.*?/\)', '', text)
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"\[edit\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\(/.*?/\)", "", text)
     text = _norm_numbers(text)
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip()

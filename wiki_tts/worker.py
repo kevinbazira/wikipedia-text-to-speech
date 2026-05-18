@@ -1,21 +1,22 @@
 import os
 import re
 import subprocess
+
 import numpy as np
+import onnxruntime as ort
 from celery import Celery
 from celery.signals import worker_process_init
-import onnxruntime as ort
 
 from wiki_tts.config import (
+    AUDIO_OUTPUT_DIR,
     CELERY_BROKER_URL,
+    CELERY_KEY_PREFIX,
     CELERY_RESULT_BACKEND,
     CELERY_TASK_DEFAULT_QUEUE,
-    CELERY_KEY_PREFIX,
-    ORT_NUM_THREADS,
-    AUDIO_OUTPUT_DIR,
-    MODEL_FILE,
-    VOICES_FILE,
     FFMPEG_PATH,
+    MODEL_FILE,
+    ORT_NUM_THREADS,
+    VOICES_FILE,
 )
 
 # ── Celery app ───────────────────────────────────────────────────────────────
@@ -47,11 +48,12 @@ kokoro_model = None
 
 # ── Text chunking ─────────────────────────────────────────────────────────────
 
+
 def _split_text(text: str, max_chars: int = 800) -> list[str]:
     if len(text) <= max_chars:
         return [text]
 
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = re.split(r"(?<=[.!?])\s+", text)
     chunks = []
     current = ""
 
@@ -102,15 +104,18 @@ def _crossfade(a: np.ndarray, b: np.ndarray, fade_len: int = 120) -> np.ndarray:
 
 # ── Model initialisation ─────────────────────────────────────────────────────
 
+
 @worker_process_init.connect
 def init_worker(**kwargs):
     global kokoro_model
     print("Pre-loading Kokoro-ONNX FP32 model into memory...")
     from kokoro_onnx import Kokoro
+
     kokoro_model = Kokoro(MODEL_FILE, VOICES_FILE)
 
 
 # ── Task ──────────────────────────────────────────────────────────────────────
+
 
 @app.task
 def generate_section_audio(article: str, section: str, text: str):
@@ -146,12 +151,25 @@ def generate_section_audio(article: str, section: str, text: str):
             audio_array = _crossfade(audio_array, part, fade_len=120)
 
     ffmpeg_cmd = [
-        FFMPEG_PATH, "-y",
-        "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
-        "-vn", "-b:a", "64k", mp3_path,
+        FFMPEG_PATH,
+        "-y",
+        "-f",
+        "f32le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        "1",
+        "-i",
+        "pipe:0",
+        "-vn",
+        "-b:a",
+        "64k",
+        mp3_path,
     ]
 
-    process = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    process = subprocess.Popen(  # noqa: S603
+        ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL
+    )
     process.communicate(input=audio_array.tobytes())
 
     print(f"Finished: {mp3_path}")

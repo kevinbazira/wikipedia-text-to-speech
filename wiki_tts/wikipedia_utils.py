@@ -1,4 +1,4 @@
-BLOCKLIST = ['see also', 'references', 'external links', 'further reading', 'notes']
+BLOCKLIST = ["see also", "references", "external links", "further reading", "notes"]
 
 
 def get_valid_sections(sections) -> list:
