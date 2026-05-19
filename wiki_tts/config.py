@@ -1,4 +1,6 @@
 import os
+import tempfile
+from pathlib import Path
 
 # ── Environment detection ────────────────────────────────────────────────────
 IS_TOOLFORGE = os.path.exists("/data/project/wiki-tts")
@@ -29,3 +31,7 @@ VOICES_FILE = "voices-v1.0.bin"
 TOOLFORGE_FFMPEG = "/data/project/wiki-tts/bin/ffmpeg"
 LOCAL_FFMPEG = "ffmpeg"
 FFMPEG_PATH = TOOLFORGE_FFMPEG if IS_TOOLFORGE else LOCAL_FFMPEG
+
+# ── NeMo Text Processing ────────────────────────────────────────────────────
+NEMO_WHITELIST = str(Path(__file__).resolve().parent / "nemo_whitelist.tsv")
+NEMO_GRAMMAR_CACHE = os.path.join(tempfile.gettempdir(), "wiki-tts-nemo-grammars")

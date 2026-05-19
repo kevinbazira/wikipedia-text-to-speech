@@ -1,4 +1,9 @@
+import logging
 import re
+
+from wiki_tts.config import NEMO_GRAMMAR_CACHE, NEMO_WHITELIST
+
+logger = logging.getLogger(__name__)
 
 _WORDS = (
     "zero one two three four five six seven eight nine ten "
@@ -8,6 +13,103 @@ _WORDS = (
 _TENS = "twenty thirty forty fifty sixty seventy eighty ninety".split()
 
 _SCALES = ["", "thousand", "million", "billion"]
+
+# ── Unit abbreviation expansion ────────────────────────────────────────────
+
+# Full list used as fallback when NeMo is unavailable (no singular/plural distinction).
+_UNIT_SUBS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km/h\b"), r"\1 kilometers per hour"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km²\b"), r"\1 square kilometers"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km\b"), r"\1 kilometers"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m²\b"), r"\1 square meters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*mm\b"), r"\1 millimeters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*cm\b"), r"\1 centimeters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m\b"), r"\1 meters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*mph\b"), r"\1 miles per hour"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*ft\b"), r"\1 feet"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*mi\b"), r"\1 miles"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*in\b"), r"\1 inches"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*kg\b"), r"\1 kilograms"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*mg\b"), r"\1 milligrams"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*g\b"), r"\1 grams"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*lb\b"), r"\1 pounds"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*oz\b"), r"\1 ounces"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*ml\b"), r"\1 milliliters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*L\b"), r"\1 liters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m/s²\b"), r"\1 meters per second squared"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m/s\b"), r"\1 meters per second"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*°C\b"), r"\1 degrees Celsius"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*°F\b"), r"\1 degrees Fahrenheit"),
+]
+
+# Compound / special units that NeMo's MEASURE grammar doesn't handle natively.
+# These are expanded before NeMo so the number is still in digit form.
+_COMPOUND_UNIT_SUBS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km/h\b"), r"\1 kilometers per hour"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*km²\b"), r"\1 square kilometers"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m²\b"), r"\1 square meters"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m/s²\b"), r"\1 meters per second squared"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*m/s\b"), r"\1 meters per second"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*mph\b"), r"\1 miles per hour"),
+]
+
+
+def _norm_units(text: str) -> str:
+    """Expand measurement unit abbreviations following numeric values.
+
+    "2060 m" -> "2060 meters"
+    "3.5 km/h" -> "3.5 kilometers per hour"
+    "100°C" -> "100 degrees Celsius"
+    """
+    for pattern, replacement in _UNIT_SUBS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _norm_compound_units(text: str) -> str:
+    """Expand compound or special units that NeMo's grammar doesn't handle.
+
+    Keeps digit form so NeMo can normalise the number with correct
+    singular/plural for any attached simple units (e.g. "2 m/s" -> NeMo handles "2" -> "two").
+    """
+    for pattern, replacement in _COMPOUND_UNIT_SUBS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+# ── NeMo Text Processing ────────────────────────────────────────────────────
+
+_nemo_normalizer = None
+
+
+def init_nemo() -> None:
+    """Initialize the NeMo text normalizer (called once at worker startup)."""
+    global _nemo_normalizer
+    if _nemo_normalizer is not None:
+        return  # already initialised
+
+    try:
+        logger.info("Initialising NeMo text normalizer...")
+        from nemo_text_processing.text_normalization.normalize import Normalizer
+
+        _nemo_normalizer = Normalizer(
+            input_case="cased",
+            lang="en",
+            whitelist=NEMO_WHITELIST,
+            cache_dir=NEMO_GRAMMAR_CACHE,
+            overwrite_cache=False,
+        )
+        _nemo_normalizer.normalize("Warm up.")  # trigger grammar compilation
+        logger.info("NeMo text normalizer ready.")
+    except Exception:
+        logger.warning("NeMo text normalizer unavailable; falling back to regex.", exc_info=True)
+
+
+def _norm_nemo(text: str) -> str:
+    """Apply NeMo text normalisation if available, otherwise return text unchanged."""
+    if _nemo_normalizer is not None:
+        return _nemo_normalizer.normalize(text)
+    return text
 
 
 def _int_to_words(n: int) -> str:
@@ -76,13 +178,35 @@ def _norm_numbers(text: str) -> str:
 
 
 def clean_spoken_text(text: str) -> str:
-    """Normalize Wikipedia text for TTS: removes citations, phonetic guides, normalizes numbers."""
+    """Normalize Wikipedia text for TTS: removes citations, HTML, phonetic guides,
+    expands units, normalizes numbers, dates, currency, and abbreviations."""
     if not text:
         return ""
 
+    # ── 1. Strip markup ─────────────────────────────────────────────────────
     text = re.sub(r"\[\d+\]", "", text)
     text = re.sub(r"\[edit\]", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\(/.*?/\)", "", text)
-    text = _norm_numbers(text)
+    text = re.sub(r"<[^>]+>", "", text)  # HTML tags (<sub>, <sup>, etc.)
+
+    # ── 2. Normalize special characters ─────────────────────────────────────
+    # En-dash / em-dash between numbers → "to"  (e.g. "100–900" → "100 to 900")
+    text = re.sub(r"(\d+)\s*[–—]\s*(\d+)", r"\1 to \2", text)
+
+    # ── 3. Compound unit expansion (only for units NeMo doesn't handle natively) ─
+    text = _norm_compound_units(text)
+
+    # Remaining superscripts (after unit expansion so km²/m²/m/s² match first)
+    text = text.replace("²", " squared")
+    text = text.replace("³", " cubed")
+
+    # ── 4. NeMo full normalisation ──────────────────────────────────────────
+    text = _norm_nemo(text)
+
+    # ── 5. Fallback when NeMo is unavailable ────────────────────────────────
+    if _nemo_normalizer is None:
+        text = _norm_units(text)  # full unit list (always plural)
+        text = _norm_numbers(text)
+
     text = re.sub(r"\s+", " ", text)
     return text.strip()

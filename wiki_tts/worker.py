@@ -18,6 +18,7 @@ from wiki_tts.config import (
     ORT_NUM_THREADS,
     VOICES_FILE,
 )
+from wiki_tts.text import clean_spoken_text, init_nemo
 
 # ── Celery app ───────────────────────────────────────────────────────────────
 app = Celery("wiki_tts", broker=CELERY_BROKER_URL)
@@ -108,10 +109,13 @@ def _crossfade(a: np.ndarray, b: np.ndarray, fade_len: int = 120) -> np.ndarray:
 @worker_process_init.connect
 def init_worker(**kwargs):
     global kokoro_model
+
     print("Pre-loading Kokoro-ONNX FP32 model into memory...")
     from kokoro_onnx import Kokoro
 
     kokoro_model = Kokoro(MODEL_FILE, VOICES_FILE)
+
+    init_nemo()
 
 
 # ── Task ──────────────────────────────────────────────────────────────────────
@@ -122,6 +126,10 @@ def generate_section_audio(article: str, section: str, text: str):
     print(f"Processing: {article} -> {section}")
 
     global kokoro_model
+
+    # Normalize raw Wikipedia text with NeMo (warmed up during worker init).
+    # NeMo handles numbers, units, dates, currency, abbreviations, etc.
+    text = clean_spoken_text(text)
 
     safe_article = article.replace(" ", "_").replace("/", "-")
     safe_section = section.replace(" ", "_").replace("/", "-")

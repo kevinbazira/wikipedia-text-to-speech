@@ -1,6 +1,9 @@
 [project]
 name = "wiki-tts"
 requires-python = ">=3.11"
+dependencies = [
+    "nemo_text_processing==1.1.0",
+]
 
 [tool.ruff]
 target-version = "py311"

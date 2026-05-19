@@ -62,7 +62,7 @@ def _queue_missing_sections(article_title: str) -> dict:
         if acquire_lock(safe_article, safe_sec):
             cleaned = clean_spoken_text(raw_text)
             if len(cleaned) > MIN_TEXT_LENGTH:
-                generate_section_audio.delay(article=page.title, section=sec_title, text=cleaned)
+                generate_section_audio.delay(article=page.title, section=sec_title, text=raw_text)
                 sections_queued += 1
             else:
                 release_lock(safe_article, safe_sec)
@@ -107,7 +107,7 @@ def _fetch_single_section_text(article_title: str, section_title: str) -> tuple[
     if len(cleaned) <= MIN_TEXT_LENGTH:
         return None, "Section text too short for TTS generation"
 
-    return cleaned, None
+    return text, None  # Return raw — worker's NeMo normalizes from scratch
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
