@@ -34,4 +34,6 @@ FFMPEG_PATH = TOOLFORGE_FFMPEG if IS_TOOLFORGE else LOCAL_FFMPEG
 
 # ── NeMo Text Processing ────────────────────────────────────────────────────
 NEMO_WHITELIST = str(Path(__file__).resolve().parent / "nemo_whitelist.tsv")
-NEMO_GRAMMAR_CACHE = os.path.join(tempfile.gettempdir(), "wiki-tts-nemo-grammars")
+TOOLFORGE_NEMO_CACHE = "/data/project/wiki-tts/nemo_cache"
+LOCAL_NEMO_CACHE = os.path.join(tempfile.gettempdir(), "wiki-tts-nemo-grammars")
+NEMO_GRAMMAR_CACHE = TOOLFORGE_NEMO_CACHE if IS_TOOLFORGE else LOCAL_NEMO_CACHE
