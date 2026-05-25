@@ -139,24 +139,30 @@ def generate_section_audio(article: str, section: str, text: str):
 
     mp3_path = f"{output_dir}/{safe_section}.mp3"
 
+    # ── Section heading announcement (SSML <break time="1s"/> equivalent) ──
+    heading_text = f"{article}." if section == "Lead" else f"{section}."
+    heading_audio, sample_rate = kokoro_model.create(heading_text, voice="af_heart", speed=1.0, lang="en-us")
+    pause = np.zeros(int(sample_rate * 1.0), dtype=heading_audio.dtype)  # 1-second silence
+    print(f"  Prepended heading: '{heading_text}'")
+
+    # ── Content audio generation ──────────────────────────────────────────
     chunks = _split_text(text, max_chars=800)
 
     if len(chunks) == 1:
-        audio_array, sample_rate = kokoro_model.create(text, voice="af_heart", speed=1.0, lang="en-us")
+        content_audio, _ = kokoro_model.create(text, voice="af_heart", speed=1.0, lang="en-us")
     else:
         print(f"  Split into {len(chunks)} chunks (max 800 chars each)")
-        sample_rate = None
         audio_parts = []
         for i, chunk in enumerate(chunks):
             print(f"  Chunk {i + 1}/{len(chunks)} (len={len(chunk)} chars)")
-            chunk_audio, sr = kokoro_model.create(chunk, voice="af_heart", speed=1.0, lang="en-us")
-            if sample_rate is None:
-                sample_rate = sr
+            chunk_audio, _ = kokoro_model.create(chunk, voice="af_heart", speed=1.0, lang="en-us")
             audio_parts.append(chunk_audio)
 
-        audio_array = audio_parts[0]
+        content_audio = audio_parts[0]
         for part in audio_parts[1:]:
-            audio_array = _crossfade(audio_array, part, fade_len=120)
+            content_audio = _crossfade(content_audio, part, fade_len=120)
+
+    audio_array = np.concatenate([heading_audio, pause, content_audio])
 
     ffmpeg_cmd = [
         FFMPEG_PATH,
