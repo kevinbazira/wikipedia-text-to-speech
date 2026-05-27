@@ -152,7 +152,7 @@ def generate_audio(articles: str):
 
 
 @app.get("/audio")
-def get_audio(article: str, section: str):
+def get_audio_dynamic(article: str, section: str):
     """
     If the MP3 exists, serve it directly (HTTP 200).
     Otherwise, atomically check the Redis lock and queue generation (HTTP 202).
@@ -185,4 +185,23 @@ def get_audio(article: str, section: str):
             "status": "processing",
             "message": f"Audio for '{article}' - '{section}' is generating.",
         },
+    )
+
+
+@app.get("/audio/{article:path}/{section}.mp3")
+def get_audio_static(article: str, section: str):
+    """
+    Pure static URL for native OS audio players (iOS AVPlayer, Android ExoPlayer, etc).
+    Returns HTTP 200 (MP3 byte-stream) if the file exists, or HTTP 404 if it doesn't.
+    NB: Does not trigger generation.
+    """
+    file_path = _audio_path(article, section)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Audio file not found.")
+
+    return FileResponse(
+        path=file_path,
+        media_type="audio/mpeg",
+        filename=f"{section}.mp3",
     )
