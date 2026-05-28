@@ -56,14 +56,14 @@ $ source ~/www/python/venv/bin/activate
 # Install dependencies from requirements
 $ pip install --upgrade pip wheel
 $ pip install -r requirements.txt
-$ exit
-```
 
-#### 2.3. Download models
-Download the Kokoro TTS model, voice profiles, and Wav2Vec2 alignment model directly into the expected paths.
-```bash
-$ cd ~/www/python/src
+# Download the Kokoro TTS model, voice profiles, and Wav2Vec2 alignment model directly into the expected paths.
 $ python3 scripts/download_models.py
+
+# Pre-compile the NeMo grammar cache so the celery worker starts faster.
+# This avoids the k8s pod startup penalty (CrashLoopBackOff) from the 60+ second compilation timeout.
+$ python3 scripts/initialize_nemo_cache.py
+$ exit
 ```
 
 ### 3. Redis Message Broker
