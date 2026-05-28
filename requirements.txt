@@ -21,5 +21,9 @@ wikipedia-api==0.14.1
 # ONNX Runtime (pinned for stability)
 onnxruntime==1.25.1
 
+# Forced alignment (Wav2Vec2 resampling)
+scipy==1.17.1
+transformers==5.9.0
+
 # Dev / Benchmark
 py-cpuinfo==9.0.0

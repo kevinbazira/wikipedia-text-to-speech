@@ -72,15 +72,15 @@ $ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files
 The Celery queue relies on [Toolforge's shared Redis](https://wikitech.wikimedia.org/wiki/Help:Toolforge/Redis). No setup is required. Connection is handled automatically via `redis.svc.tools.eqiad1.wikimedia.cloud:6379`.
 
 ### 4. Start Celery workers
-Start the background inference workers as a continuous Toolforge job. This spans 10 replicas, pinned to 1 CPU thread each, to prevent CPU thrashing and ensure fast parallel generation. (see [T425804#11914308](https://phabricator.wikimedia.org/T425804#11914308))
+Start the background inference workers as a continuous Toolforge job. This spans 10 replicas, pinned to 1 CPU thread each, to prevent CPU thrashing and ensure fast parallel generation. (see [T425804#11914308](https://phabricator.wikimedia.org/T425804#11914308) and [P93273](https://phabricator.wikimedia.org/P93273))
 ```bash
 $ cd ~/www/python/src
 $ toolforge jobs run celery-worker \
 --command "export ORT_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && cd ~/www/python/src && ~/www/python/venv/bin/celery -A wiki_tts.worker worker --pool solo --loglevel=info" \
 --image python3.11 \
 --continuous \
---replicas 10 \
---mem 2Gi \
+--replicas 7 \
+--mem 3Gi \
 --cpu 1
 
 # Confirm the workers are running

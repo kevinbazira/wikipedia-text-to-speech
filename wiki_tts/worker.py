@@ -19,6 +19,7 @@ from wiki_tts.config import (
     VOICES_FILE,
 )
 from wiki_tts.text import clean_spoken_text, init_nemo
+from wiki_tts.timestamps import align_words, init_aligner, timestamps_to_vtt
 
 # ── Celery app ───────────────────────────────────────────────────────────────
 app = Celery("wiki_tts", broker=CELERY_BROKER_URL)
@@ -38,6 +39,7 @@ def patched_init(self, path_or_bytes, sess_options=None, providers=None, provide
     sess_options.intra_op_num_threads = ORT_NUM_THREADS
     sess_options.inter_op_num_threads = 1
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess_options.enable_cpu_mem_arena = False
     original_init(self, path_or_bytes, sess_options, providers, provider_options, **kwargs)
 
 
@@ -88,21 +90,6 @@ def _split_text(text: str, max_chars: int = 800) -> list[str]:
     return chunks
 
 
-def _crossfade(a: np.ndarray, b: np.ndarray, fade_len: int = 120) -> np.ndarray:
-    if fade_len <= 0 or len(a) < fade_len or len(b) < fade_len:
-        return np.concatenate([a, b])
-
-    fade_out = np.linspace(1, 0, fade_len)
-    fade_in = np.linspace(0, 1, fade_len)
-
-    amp = a.copy()
-    bmp = b.copy()
-    amp[-fade_len:] *= fade_out
-    bmp[:fade_len] *= fade_in
-
-    return np.concatenate([amp[:-fade_len], amp[-fade_len:] + bmp[:fade_len], bmp[fade_len:]])
-
-
 # ── Model initialisation ─────────────────────────────────────────────────────
 
 
@@ -116,6 +103,7 @@ def init_worker(**kwargs):
     kokoro_model = Kokoro(MODEL_FILE, VOICES_FILE)
 
     init_nemo()
+    init_aligner()
 
 
 # ── Task ──────────────────────────────────────────────────────────────────────
@@ -127,8 +115,6 @@ def generate_section_audio(article: str, section: str, text: str):
 
     global kokoro_model
 
-    # Normalize raw Wikipedia text with NeMo (warmed up during worker init).
-    # NeMo handles numbers, units, dates, currency, abbreviations, etc.
     text = clean_spoken_text(text)
 
     safe_article = article.replace(" ", "_").replace("/", "-")
@@ -138,32 +124,15 @@ def generate_section_audio(article: str, section: str, text: str):
     os.makedirs(output_dir, exist_ok=True)
 
     mp3_path = f"{output_dir}/{safe_section}.mp3"
+    vtt_path = f"{output_dir}/{safe_section}.vtt"
 
-    # ── Section heading announcement (SSML <break time="1s"/> equivalent) ──
+    # ── Section heading announcement ──
     heading_text = f"{article}." if section == "Lead" else f"{section}."
     heading_audio, sample_rate = kokoro_model.create(heading_text, voice="af_heart", speed=1.0, lang="en-us")
-    pause = np.zeros(int(sample_rate * 1.0), dtype=heading_audio.dtype)  # 1-second silence
+    pause = np.zeros(int(sample_rate * 1.0), dtype=heading_audio.dtype)
     print(f"  Prepended heading: '{heading_text}'")
 
-    # ── Content audio generation ──────────────────────────────────────────
-    chunks = _split_text(text, max_chars=800)
-
-    if len(chunks) == 1:
-        content_audio, _ = kokoro_model.create(text, voice="af_heart", speed=1.0, lang="en-us")
-    else:
-        print(f"  Split into {len(chunks)} chunks (max 800 chars each)")
-        audio_parts = []
-        for i, chunk in enumerate(chunks):
-            print(f"  Chunk {i + 1}/{len(chunks)} (len={len(chunk)} chars)")
-            chunk_audio, _ = kokoro_model.create(chunk, voice="af_heart", speed=1.0, lang="en-us")
-            audio_parts.append(chunk_audio)
-
-        content_audio = audio_parts[0]
-        for part in audio_parts[1:]:
-            content_audio = _crossfade(content_audio, part, fade_len=120)
-
-    audio_array = np.concatenate([heading_audio, pause, content_audio])
-
+    # ── Start FFmpeg early (streaming writer) ──
     ffmpeg_cmd = [
         FFMPEG_PATH,
         "-y",
@@ -180,11 +149,79 @@ def generate_section_audio(article: str, section: str, text: str):
         "64k",
         mp3_path,
     ]
-
     process = subprocess.Popen(  # noqa: S603
         ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL
     )
-    process.communicate(input=audio_array.tobytes())
 
-    print(f"Finished: {mp3_path}")
-    return mp3_path
+    all_word_timestamps: list[dict] = []
+    current_time_ms = 0.0
+
+    try:
+        # ── Stream heading + pause ──
+        process.stdin.write(heading_audio.tobytes())
+        process.stdin.write(pause.tobytes())
+
+        heading_ts = align_words(heading_audio, sample_rate, heading_text)
+        for t in heading_ts:
+            t["start_ms"] += current_time_ms
+            t["end_ms"] += current_time_ms
+            all_word_timestamps.append(t)
+
+        current_time_ms += (len(heading_audio) / sample_rate) * 1000 + 1000.0
+
+        # ── Streaming content chunks ──
+        chunks = _split_text(text, max_chars=400)
+        print(f"  Split into {len(chunks)} chunks (max 400 chars each)")
+
+        fade_len = 120
+        fade_out = np.linspace(1, 0, fade_len, dtype=np.float32)
+        fade_in = np.linspace(0, 1, fade_len, dtype=np.float32)
+        prev_tail: np.ndarray | None = None
+
+        for i, chunk in enumerate(chunks):
+            print(f"  Chunk {i + 1}/{len(chunks)} (len={len(chunk)} chars)")
+            chunk_audio, _ = kokoro_model.create(chunk, voice="af_heart", speed=1.0, lang="en-us")
+
+            # Align immediately (O(1) per chunk)
+            chunk_ts = align_words(chunk_audio, sample_rate, chunk)
+            for t in chunk_ts:
+                t["start_ms"] += current_time_ms
+                t["end_ms"] += current_time_ms
+                all_word_timestamps.append(t)
+
+            current_time_ms += (len(chunk_audio) / sample_rate) * 1000
+
+            # Stream to FFmpeg with live crossfade
+            if len(chunks) == 1:
+                process.stdin.write(chunk_audio.tobytes())
+            elif i == 0:
+                chunk_audio[-fade_len:] *= fade_out
+                prev_tail = chunk_audio[-fade_len:].copy()
+                process.stdin.write(chunk_audio[:-fade_len].tobytes())
+            elif i < len(chunks) - 1:
+                chunk_audio[:fade_len] *= fade_in
+                chunk_audio[:fade_len] += prev_tail
+                chunk_audio[-fade_len:] *= fade_out
+                prev_tail = chunk_audio[-fade_len:].copy()
+                process.stdin.write(chunk_audio[:-fade_len].tobytes())
+            else:
+                chunk_audio[:fade_len] *= fade_in
+                chunk_audio[:fade_len] += prev_tail
+                process.stdin.write(chunk_audio.tobytes())
+
+        # ── Finalize ──
+        process.stdin.close()
+        process.wait()
+
+        if all_word_timestamps:
+            with open(vtt_path, "w", encoding="utf-8") as f:
+                f.write(timestamps_to_vtt(all_word_timestamps))
+            print(f"  Saved {len(all_word_timestamps)} word timestamps")
+
+        print(f"Finished: {mp3_path}")
+        return mp3_path
+
+    except Exception:
+        process.stdin.close()
+        process.wait()
+        raise

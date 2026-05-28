@@ -191,7 +191,7 @@ def get_audio_dynamic(article: str, section: str):
 @app.get("/audio/{article:path}/{section}.mp3")
 def get_audio_static(article: str, section: str):
     """
-    Pure static URL for native OS audio players (iOS AVPlayer, Android ExoPlayer, etc).
+    Static URL for native OS audio players (iOS AVPlayer, Android ExoPlayer, etc).
     Returns HTTP 200 (MP3 byte-stream) if the file exists, or HTTP 404 if it doesn't.
     NB: Does not trigger generation.
     """
@@ -204,4 +204,25 @@ def get_audio_static(article: str, section: str):
         path=file_path,
         media_type="audio/mpeg",
         filename=f"{section}.mp3",
+    )
+
+
+@app.get("/audio/{article:path}/{section}.vtt")
+def get_captions_static(article: str, section: str):
+    """
+    Static URL for word-level captions (WebVTT format).
+    Returns HTTP 200 with text/vtt content if captions exist,
+    or HTTP 404 if they haven't been generated yet.
+    """
+    safe_article = article.replace(" ", "_").replace("/", "-")
+    safe_section = section.replace(" ", "_").replace("/", "-")
+    vtt_path = f"{AUDIO_OUTPUT_DIR}/{safe_article}/{safe_section}.vtt"
+
+    if not os.path.exists(vtt_path):
+        raise HTTPException(status_code=404, detail="Captions not found.")
+
+    return FileResponse(
+        path=vtt_path,
+        media_type="text/vtt",
+        filename=f"{safe_section}.vtt",
     )
