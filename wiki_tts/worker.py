@@ -14,9 +14,9 @@ from wiki_tts.config import (
     CELERY_RESULT_BACKEND,
     CELERY_TASK_DEFAULT_QUEUE,
     FFMPEG_PATH,
-    MODEL_FILE,
+    KOKORO_MODEL,
+    KOKORO_VOICES,
     ORT_NUM_THREADS,
-    VOICES_FILE,
 )
 from wiki_tts.text import clean_spoken_text, init_nemo
 from wiki_tts.timestamps import align_words, init_aligner, timestamps_to_vtt
@@ -100,7 +100,7 @@ def init_worker(**kwargs):
     print("Pre-loading Kokoro-ONNX FP32 model into memory...")
     from kokoro_onnx import Kokoro
 
-    kokoro_model = Kokoro(MODEL_FILE, VOICES_FILE)
+    kokoro_model = Kokoro(KOKORO_MODEL, KOKORO_VOICES)
 
     init_nemo()
     init_aligner()

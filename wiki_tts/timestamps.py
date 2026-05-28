@@ -17,11 +17,12 @@ import onnxruntime as ort
 import scipy.signal
 from transformers import Wav2Vec2Processor
 
+from wiki_tts.config import WAV2VEC2_MODEL, WAV2VEC2_MODEL_DIR, WAV2VEC2_PROCESSOR_DIR
+
 logger = logging.getLogger(__name__)
 
 ALIGNER_SR = 16000  # Wav2Vec2 expects 16 kHz input
 FRAME_DURATION_MS = 20  # Wav2Vec2 frame stride at 16 kHz (20 ms per frame)
-MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "wav2vec2"
 
 _aligner_session = None
 _aligner_processor = None
@@ -41,12 +42,12 @@ def init_aligner() -> None:
     if _aligner_session is not None:
         return
 
-    model_path = MODEL_DIR / "model.onnx"
-    processor_path = MODEL_DIR / "processor"
+    model_path = Path(WAV2VEC2_MODEL)
+    processor_path = Path(WAV2VEC2_PROCESSOR_DIR)
     if not model_path.exists() or not processor_path.exists():
         logger.warning(
             "Wav2Vec2 model or processor not found at %s; word timestamps unavailable",
-            MODEL_DIR,
+            WAV2VEC2_MODEL_DIR,
         )
         return
 
@@ -55,8 +56,8 @@ def init_aligner() -> None:
     sess_options.intra_op_num_threads = 1
     sess_options.inter_op_num_threads = 1
     sess_options.enable_cpu_mem_arena = False
-    _aligner_session = ort.InferenceSession(str(model_path), sess_options)
-    _aligner_processor = Wav2Vec2Processor.from_pretrained(str(processor_path))
+    _aligner_session = ort.InferenceSession(WAV2VEC2_MODEL, sess_options)
+    _aligner_processor = Wav2Vec2Processor.from_pretrained(WAV2VEC2_PROCESSOR_DIR)
     logger.info("Wav2Vec2-CTC aligner ready.")
 
 

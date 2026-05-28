@@ -25,9 +25,19 @@ ORT_NUM_THREADS = int(os.environ.get("ORT_NUM_THREADS", "1"))
 AUDIO_OUTPUT_DIR = "./audio_output"
 MIN_TEXT_LENGTH = 50
 
-MODEL_FILE = "kokoro-v1.0.onnx"
-VOICES_FILE = "voices-v1.0.bin"
+MODEL_DIR = str(Path(__file__).resolve().parent.parent / "models")
 
+# Kokoro
+KOKORO_MODEL_DIR = os.path.join(MODEL_DIR, "kokoro")
+KOKORO_MODEL = os.path.join(KOKORO_MODEL_DIR, "kokoro-v1.0.onnx")
+KOKORO_VOICES = os.path.join(KOKORO_MODEL_DIR, "voices-v1.0.bin")
+
+# Wav2Vec2
+WAV2VEC2_MODEL_DIR = os.path.join(MODEL_DIR, "wav2vec2")
+WAV2VEC2_MODEL = os.path.join(WAV2VEC2_MODEL_DIR, "model.onnx")
+WAV2VEC2_PROCESSOR_DIR = os.path.join(WAV2VEC2_MODEL_DIR, "processor")
+
+# ffmpeg
 TOOLFORGE_FFMPEG = "/data/project/wiki-tts/bin/ffmpeg"
 LOCAL_FFMPEG = "ffmpeg"
 FFMPEG_PATH = TOOLFORGE_FFMPEG if IS_TOOLFORGE else LOCAL_FFMPEG
