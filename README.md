@@ -59,13 +59,11 @@ $ pip install -r requirements.txt
 $ exit
 ```
 
-#### 2.3. Download Kokoro TTS model
-
-Download the optimized Kokoro ONNX model and voice profiles directly into the `src` directory.
+#### 2.3. Download models
+Download the Kokoro TTS model, voice profiles, and Wav2Vec2 alignment model directly into the expected paths.
 ```bash
 $ cd ~/www/python/src
-$ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
-$ wget https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+$ python3 scripts/download_models.py
 ```
 
 ### 3. Redis Message Broker
