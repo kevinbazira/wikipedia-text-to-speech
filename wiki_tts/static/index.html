@@ -312,6 +312,7 @@
         /* ─── Section list ─── */
         .section-row {
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
@@ -339,9 +340,36 @@
             color: var(--color-secondary);
         }
         .audio-player {
-            width: 100%;
+            width: 260px;
             height: 36px;
             display: block;
+        }
+
+        /* ─── Transcript Highlighting ─── */
+        .transcript-container {
+            flex: 0 0 100%;
+            margin-top: 5px;
+            padding: 15px;
+            background-color: var(--color-bg-light);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 0.95rem;
+            line-height: 1.8;
+            color: var(--color-base);
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.02);
+        }
+        .transcript-word {
+            transition: background-color 0.1s ease, color 0.1s ease;
+            border-radius: 2px;
+            padding: 0 2px;
+        }
+        .transcript-word.active {
+            background-color: #fff8e6;
+            color: #000;
+            font-weight: 600;
+            border-bottom: 2px solid #fc3;
         }
 
         /* ─── Badges ─── */
@@ -464,6 +492,37 @@
 
     function slugify(str) {
         return str.replace(/[^a-z0-9]/gi, '-').toLowerCase().replace(/^-+|-+$/g, '');
+    }
+
+    /* ─── VTT Parser ─── */
+    function parseVTT(vttText) {
+        const cues = [];
+        const blocks = vttText.split(/\n\s*\n/);
+
+        for (let block of blocks) {
+            if (block.includes('-->')) {
+                const lines = block.split('\n');
+                const timeLine = lines.find(l => l.includes('-->'));
+                const textLine = lines[lines.length - 1];
+
+                const timeToSeconds = (timeStr) => {
+                    const parts = timeStr.trim().split(':');
+                    const secParts = parts[2].split('.');
+                    return (parseInt(parts[0]) * 3600) +
+                           (parseInt(parts[1]) * 60) +
+                           parseInt(secParts[0]) +
+                           (parseInt(secParts[1]) / 1000);
+                };
+
+                const [startStr, endStr] = timeLine.split('-->');
+                cues.push({
+                    start: timeToSeconds(startStr),
+                    end: timeToSeconds(endStr),
+                    text: textLine.trim()
+                });
+            }
+        }
+        return cues;
     }
 
     function actionId(article, section) {
@@ -603,7 +662,7 @@
                     // NEW: Explicitly handle 200 vs 202
                     if (res.status === 200) {
                         if (!container.querySelector('audio')) {
-                            renderPlayer(container, `/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
+                            renderPlayer(container, job.article, job.section);
                         }
                         this.ready[job.article] = (this.ready[job.article] || 0) + 1;
                     } else if (res.status === 202) {
@@ -708,13 +767,72 @@
         container.appendChild(retry);
     }
 
-    function renderPlayer(container, url) {
+    async function renderPlayer(container, article, section) {
         container.innerHTML = '';
+
+        const safeArticle = encodeURIComponent(article);
+        const safeSection = encodeURIComponent(section);
+        const audioUrl = `/audio/${safeArticle}/${safeSection}.mp3`;
+        const vttUrl = `/audio/${safeArticle}/${safeSection}.vtt`;
+
+        // 1. Audio player
         const audio = document.createElement('audio');
         audio.controls = true;
         audio.className = 'audio-player';
-        audio.src = url;
+        audio.src = audioUrl;
         container.appendChild(audio);
+
+        // 2. Fetch and render VTT transcript
+        try {
+            const vttRes = await fetch(vttUrl);
+            if (vttRes.ok) {
+                const vttText = await vttRes.text();
+                const cues = parseVTT(vttText);
+
+                const transcriptDiv = document.createElement('div');
+                transcriptDiv.className = 'transcript-container';
+
+                cues.forEach((cue) => {
+                    const span = document.createElement('span');
+                    span.className = 'transcript-word';
+                    span.textContent = cue.text + ' ';
+                    transcriptDiv.appendChild(span);
+                });
+
+                // Attach transcript to the full-width of the section-row
+                const row = container.closest('.section-row');
+
+                // Remove any existing transcript on re-render
+                const existingTranscript = row.querySelector('.transcript-container');
+                if (existingTranscript) existingTranscript.remove();
+
+                row.appendChild(transcriptDiv);
+
+                // 3. Sync highlight with audio playback
+                let currentIndex = -1;
+                audio.addEventListener('timeupdate', () => {
+                    const time = audio.currentTime;
+                    const activeIndex = cues.findIndex(c => time >= c.start && time <= c.end);
+
+                    if (activeIndex !== currentIndex) {
+                        if (currentIndex !== -1) {
+                            const prev = transcriptDiv.children[currentIndex];
+                            if (prev) prev.classList.remove('active');
+                        }
+                        if (activeIndex !== -1) {
+                            const span = transcriptDiv.children[activeIndex];
+                            if (span) {
+                                span.classList.add('active');
+                                transcriptDiv.scrollTop = span.offsetTop - transcriptDiv.offsetTop - 20;
+                            }
+                        }
+                        currentIndex = activeIndex;
+                    }
+                });
+            }
+        } catch (err) {
+            console.log('VTT not available', err);
+        }
     }
 
     function renderNetworkError(container, article, section, customMsg = 'Network error') {
@@ -746,7 +864,7 @@
                 renderProcessingState(container, article, section);
                 return {ready: false};
             } else if (res.status === 200) {
-                renderPlayer(container, url);
+                renderPlayer(container, article, section);
                 return {ready: true};
             } else if (res.status === 404) {
                 renderNetworkError(container, article, section, 'Not Found');
@@ -783,7 +901,7 @@
         try {
             const res = await fetch(`/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
             if (res.status === 200) {
-                renderPlayer(container, `/audio?article=${encodeURIComponent(job.article)}&section=${encodeURIComponent(job.section)}`);
+                renderPlayer(container, job.article, job.section);
                 return {ready: true};
             }
             return {ready: false};
@@ -918,7 +1036,7 @@
                     action.id = actionId(item.article, sec.name);
 
                     if (sec.status === 'exists') {
-                        renderPlayer(action, `/audio?article=${encodeURIComponent(item.article)}&section=${encodeURIComponent(sec.name)}`);
+                        renderPlayer(action, item.article, sec.name);
                     } else {
                         renderActionButton(action, item.article, sec.name);
                     }
