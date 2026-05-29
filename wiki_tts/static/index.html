@@ -503,7 +503,7 @@
             if (block.includes('-->')) {
                 const lines = block.split('\n');
                 const timeLine = lines.find(l => l.includes('-->'));
-                const textLine = lines[lines.length - 1];
+                const textLine = lines.slice(1).find(l => l.trim()) || '';
 
                 const timeToSeconds = (timeStr) => {
                     const parts = timeStr.trim().split(':');

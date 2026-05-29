@@ -208,5 +208,10 @@ def clean_spoken_text(text: str) -> str:
         text = _norm_units(text)  # full unit list (always plural)
         text = _norm_numbers(text)
 
+    # ── 6. Remove orphaned punctuation from stripped Wikipedia symbols ────
+    text = re.sub(r"\s+([.,!?:;])", r"\1", text)
+    text = re.sub(r",\s*\.", ".", text)
+    text = re.sub(r",+", ",", text)
+
     text = re.sub(r"\s+", " ", text)
     return text.strip()

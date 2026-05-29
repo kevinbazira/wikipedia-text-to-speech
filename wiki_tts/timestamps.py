@@ -181,6 +181,30 @@ def _ctc_word_alignment(
             char_in_word = 0
             word_start_global = None
 
+    # ── Flush remaining words ──
+    if char_in_word > 0 and word_idx < len(clean_words):
+        word_end_frame = segments[-1][2] if segments else len(ids)
+        word_timestamps.append(
+            {
+                "word": words[word_idx],
+                "start_ms": word_start_global * FRAME_DURATION_MS,
+                "end_ms": word_end_frame * FRAME_DURATION_MS,
+            }
+        )
+        word_idx += 1
+
+    final_ms = len(ids) * FRAME_DURATION_MS
+    while word_idx < len(words):
+        start_ms = word_timestamps[-1]["end_ms"] if word_timestamps else final_ms
+        word_timestamps.append(
+            {
+                "word": words[word_idx],
+                "start_ms": start_ms,
+                "end_ms": final_ms,
+            }
+        )
+        word_idx += 1
+
     return word_timestamps
 
 
