@@ -1,14 +1,28 @@
 import os
 
 import wikipediaapi
+from celery import Celery
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from wiki_tts.config import AUDIO_OUTPUT_DIR, MIN_TEXT_LENGTH
+from wiki_tts.config import (
+    AUDIO_OUTPUT_DIR,
+    CELERY_BROKER_URL,
+    CELERY_KEY_PREFIX,
+    CELERY_TASK_DEFAULT_QUEUE,
+    MIN_TEXT_LENGTH,
+)
 from wiki_tts.locking import acquire_lock, release_lock
 from wiki_tts.text import clean_spoken_text
 from wiki_tts.wikipedia_utils import find_section_by_title, get_valid_sections
+
+# ── Celery Client (lightweight publisher, no ML imports) ────────────────────
+celery_app = Celery("wiki_tts", broker=CELERY_BROKER_URL)
+celery_app.conf.update(
+    task_default_queue=CELERY_TASK_DEFAULT_QUEUE,
+    key_prefix=CELERY_KEY_PREFIX,
+)
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Wikipedia TTS Prototype | WMF ML Team")
@@ -61,9 +75,10 @@ def _queue_missing_sections(article_title: str) -> dict:
         if acquire_lock(safe_article, safe_sec):
             cleaned = clean_spoken_text(raw_text)
             if len(cleaned) > MIN_TEXT_LENGTH:
-                from wiki_tts.worker import generate_section_audio
-
-                generate_section_audio.delay(article=page.title, section=sec_title, text=raw_text)
+                celery_app.send_task(
+                    "wiki_tts.worker.generate_section_audio",
+                    kwargs={"article": page.title, "section": sec_title, "text": raw_text},
+                )
                 sections_queued += 1
             else:
                 release_lock(safe_article, safe_sec)
@@ -176,9 +191,11 @@ def get_audio_dynamic(article: str, section: str):
         if text is None:
             release_lock(safe_article, safe_section)
             raise HTTPException(status_code=404, detail=error)
-        from wiki_tts.worker import generate_section_audio
 
-        generate_section_audio.delay(article=article, section=section, text=text)
+        celery_app.send_task(
+            "wiki_tts.worker.generate_section_audio",
+            kwargs={"article": article, "section": section, "text": text},
+        )
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
