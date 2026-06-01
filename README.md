@@ -74,12 +74,12 @@ Start the background inference workers as a continuous Toolforge job. This spans
 ```bash
 $ cd ~/www/python/src
 $ toolforge jobs run celery-worker \
---command "export ORT_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && cd ~/www/python/src && ~/www/python/venv/bin/celery -A wiki_tts.worker worker --pool solo --loglevel=info" \
+--command "export PYTHONUNBUFFERED=1 ORT_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 && cd ~/www/python/src && ~/www/python/venv/bin/celery -A wiki_tts.worker worker --concurrency=1 --max-tasks-per-child=5 --loglevel=info" \
 --image python3.11 \
 --continuous \
---replicas 7 \
---mem 3Gi \
---cpu 1
+--replicas 5 \
+--mem 4Gi \
+--cpu 2
 
 # Confirm the workers are running
 $ toolforge jobs list
