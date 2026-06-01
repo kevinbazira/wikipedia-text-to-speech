@@ -9,7 +9,6 @@ from wiki_tts.config import AUDIO_OUTPUT_DIR, MIN_TEXT_LENGTH
 from wiki_tts.locking import acquire_lock, release_lock
 from wiki_tts.text import clean_spoken_text
 from wiki_tts.wikipedia_utils import find_section_by_title, get_valid_sections
-from wiki_tts.worker import generate_section_audio
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Wikipedia TTS Prototype | WMF ML Team")
@@ -62,6 +61,8 @@ def _queue_missing_sections(article_title: str) -> dict:
         if acquire_lock(safe_article, safe_sec):
             cleaned = clean_spoken_text(raw_text)
             if len(cleaned) > MIN_TEXT_LENGTH:
+                from wiki_tts.worker import generate_section_audio
+
                 generate_section_audio.delay(article=page.title, section=sec_title, text=raw_text)
                 sections_queued += 1
             else:
@@ -175,6 +176,8 @@ def get_audio_dynamic(article: str, section: str):
         if text is None:
             release_lock(safe_article, safe_section)
             raise HTTPException(status_code=404, detail=error)
+        from wiki_tts.worker import generate_section_audio
+
         generate_section_audio.delay(article=article, section=section, text=text)
 
     return JSONResponse(
