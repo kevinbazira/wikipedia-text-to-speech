@@ -152,7 +152,11 @@ The script also:
 
 **Dry-run first** to verify Redis connectivity without queueing any work:
 
+> NB: delete old `submission_progress.json` and `failed_articles.json` if they are no longer needed before re-running.
+
 ```bash
+$ rm ~/www/python/src/submission_progress.json ~/www/python/src/failed_articles.json
+
 $ toolforge webservice python3.11 shell
 $ cd ~/www/python/src
 $ source ~/www/python/venv/bin/activate
