@@ -160,13 +160,12 @@ def submit_batch(
     Returns ``(success, sections_queued)``.
     """
     articles = "|".join(titles)
-    data = urllib.parse.urlencode({"articles": articles}).encode("utf-8")
+    url = f"{api_url}?articles={urllib.parse.quote(articles, safe='')}"
 
     req = urllib.request.Request(  # noqa: S310
-        api_url,
-        data=data,
+        url,
+        data=b"",
         headers={
-            "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": "Wiki-TTS-Batch/1.0 (WMF ML Team; Toolforge)",
         },
         method="POST",
