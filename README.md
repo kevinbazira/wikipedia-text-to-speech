@@ -126,3 +126,84 @@ $ curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth|Mars"
 * **API Documentation:** [https://wiki-tts.toolforge.org/docs](https://wiki-tts.toolforge.org/docs)
 * **Prototype Demo:** ![▶️ Watch the demo](assets/Wikipedia%20TTS%20prototype%20demo.mp4)
 
+### 7. Batch TTS generation pipeline
+
+#### 7.1. Extract featured article titles
+
+Pull all Featured Article titles from the [categorymembers API](https://en.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=Category:Featured_articles&cmnamespace=0&cmlimit=max&format=json) and write them to a JSON file.
+
+```bash
+$ toolforge webservice python3.11 shell
+$ cd ~/www/python/src
+$ source ~/www/python/venv/bin/activate
+$ python3 scripts/extract_featured_articles.py
+$ less featured_articles.json
+$ exit
+```
+
+#### 7.2. Submit articles for batch generation
+
+The submission script reads `featured_articles.json` and POSTs batches of 25 pipe-separated titles to `/generate`. Before each batch it polls the Redis queue depth, and if the queue exceeds **200** pending tasks it backs off for **60 seconds**, then checks again. This auto-regulates throughput regardless of article-size variance.
+
+The script also:
+- Writes a checkpoint file (`submission_progress.json`) after every batch, so a restart resumes where it left off.
+- Retries failed batches up to 3 times with exponential backoff, then writes them to `failed_articles.json` for later reprocessing.
+- Responds to `SIGTERM`/`SIGINT` by finishing the current batch and saving progress before exiting.
+
+**Dry-run first** to verify Redis connectivity without queueing any work:
+
+```bash
+$ toolforge webservice python3.11 shell
+$ cd ~/www/python/src
+$ source ~/www/python/venv/bin/activate
+$ python3 scripts/submit_articles.py --dry-run
+$ exit
+```
+
+If the dry-run succeeds, launch the job:
+
+```bash
+$ cd ~/www/python/src
+$ toolforge jobs run batch-generation \
+--command "cd ~/www/python/src && ~/www/python/venv/bin/python3 scripts/submit_articles.py" \
+--image python3.11 \
+--continuous \
+--replicas 1 \
+--mem 512Mi \
+--cpu 1
+
+# Confirm all jobs are running (celery-worker, web server, and batch-generation)
+$ toolforge jobs list
+
+# Verify all pods are running. (celery workers, web server, and batch generation)
+# This gives richer status than the jobs list (e.g OOM kills, CrashLoopBackOff, etc)
+$ kubectl get pods
+```
+
+After all articles are submitted and the queue drains to zero, delete the job: `toolforge jobs delete batch-generation`
+
+#### 7.3. Monitoring
+
+Three things to watch while the pipeline runs:
+
+| Metric | Command | Healthy threshold |
+|---|---|---|
+| Disk space | `df -h /data/project/` | > 1.0 TB free |
+| Queue depth | `redis-cli -h redis.svc.tools.eqiad1.wikimedia.cloud LLEN wiki-tts-queue` | < 300 pending |
+| Worker health | `kubectl get pods \| grep celery` | All 5 Running, 0 restarts |
+
+#### 7.4. Retrying failed articles
+
+If any articles fail after all retries, they are written to `failed_articles.json`. To retry them after the main run completes:
+
+```bash
+$ cd ~/www/python/src
+$ toolforge jobs run batch-generation \
+--command "cd ~/www/python/src && ~/www/python/venv/bin/python3 scripts/submit_articles.py --input failed_articles.json" \
+--image python3.11 \
+--continuous \
+--replicas 1 \
+--mem 512Mi \
+--cpu 1
+```
+
