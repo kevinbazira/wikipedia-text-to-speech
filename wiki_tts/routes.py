@@ -1,4 +1,5 @@
 import os
+import time
 
 import wikipediaapi
 from celery import Celery
@@ -23,6 +24,58 @@ celery_app.conf.update(
     task_default_queue=CELERY_TASK_DEFAULT_QUEUE,
     key_prefix=CELERY_KEY_PREFIX,
 )
+
+# ── Articles catalogue cache ──────────────────────────────────────────────────
+_articles_cache: dict = {"data": [], "ts": 0}
+_ARTICLES_CACHE_TTL = 300  # 5 minutes
+
+
+def _build_articles_list() -> list[dict]:
+    """Scan audio_output/ and return a list of article summaries."""
+    articles: list[dict] = []
+    output_dir = AUDIO_OUTPUT_DIR
+
+    if not os.path.isdir(output_dir):
+        return articles
+
+    try:
+        for entry in os.scandir(output_dir):
+            if not entry.is_dir():
+                continue
+            safe_article = entry.name
+            display_name = safe_article.replace("_", " ")
+
+            mp3_files = [
+                f.name for f in os.scandir(entry.path)
+                if f.is_file() and f.name.endswith(".mp3")
+            ]
+            section_count = len(mp3_files)
+            if section_count == 0:
+                continue
+
+            first_section = sorted(mp3_files)[0].replace(".mp3", "")
+            articles.append({
+                "article": display_name,
+                "safe_article": safe_article,
+                "section_count": section_count,
+                "first_section": first_section.replace("_", " "),
+                "first_section_safe": first_section,
+            })
+    except OSError:
+        pass
+
+    articles.sort(key=lambda a: a["article"].lower())
+    return articles
+
+
+def _get_articles() -> list[dict]:
+    """Return cached article list, refreshing if TTL expired."""
+    now = time.time()
+    if now - _articles_cache["ts"] > _ARTICLES_CACHE_TTL:
+        _articles_cache["data"] = _build_articles_list()
+        _articles_cache["ts"] = now
+    return _articles_cache["data"]
+
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Wikipedia TTS Prototype | WMF ML Team")
@@ -138,6 +191,23 @@ def serve_ui():
     index_path = os.path.join(pkg_dir, "static", "index.html")
     with open(index_path, encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/library", response_class=HTMLResponse)
+def serve_library():
+    """Serve the pre-generated audio library browser."""
+    import wiki_tts
+
+    pkg_dir = os.path.dirname(wiki_tts.__file__)
+    library_path = os.path.join(pkg_dir, "static", "library.html")
+    with open(library_path, encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/articles")
+def get_articles():
+    """Return all articles with pre-generated audio sections."""
+    return _get_articles()
 
 
 @app.post("/generate")
