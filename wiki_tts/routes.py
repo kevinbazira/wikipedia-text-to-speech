@@ -45,22 +45,21 @@ def _build_articles_list() -> list[dict]:
             safe_article = entry.name
             display_name = safe_article.replace("_", " ")
 
-            mp3_files = [
-                f.name for f in os.scandir(entry.path)
-                if f.is_file() and f.name.endswith(".mp3")
-            ]
+            mp3_files = [f.name for f in os.scandir(entry.path) if f.is_file() and f.name.endswith(".mp3")]
             section_count = len(mp3_files)
             if section_count == 0:
                 continue
 
             first_section = sorted(mp3_files)[0].replace(".mp3", "")
-            articles.append({
-                "article": display_name,
-                "safe_article": safe_article,
-                "section_count": section_count,
-                "first_section": first_section.replace("_", " "),
-                "first_section_safe": first_section,
-            })
+            articles.append(
+                {
+                    "article": display_name,
+                    "safe_article": safe_article,
+                    "section_count": section_count,
+                    "first_section": first_section.replace("_", " "),
+                    "first_section_safe": first_section,
+                }
+            )
     except OSError:
         pass
 
