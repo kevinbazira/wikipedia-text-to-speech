@@ -100,6 +100,15 @@ $ toolforge webservice status
 ### 6. Interacting with the service
 
 #### 6.1. Programmatically via cURL
+
+| Use case | Endpoint | Method | Responses |
+|---|---|---|---|
+| Browse pre-generated articles | `/articles` | `GET` | HTTP 200 with JSON array of pre-generated articles with section counts |
+| On-demand article generation | `/generate?articles=Earth` or `/generate?articles=Earth\|Mars` | `POST` | HTTP 200 with queued/error details per article, HTTP 400 if articles param is empty |
+| On-demand section generation | `/audio?article=Earth&section=Lead` | `GET` | HTTP 200 with .mp3 if ready, HTTP 202 if queued for generation, HTTP 404 if invalid |
+| Static audio | `/audio/Earth/Lead.mp3` | `GET` | HTTP 200 with .mp3 byte-stream, no generation, HTTP 404 if .mp3 doesn't exist on disk |
+| Static captions | `/audio/Earth/Lead.vtt` | `GET` | HTTP 200 with .vtt, no generation, HTTP 404 if .vtt doesn't exist on disk |
+
 The primary endpoint that the Apps team will be hitting serves the .mp3 if it exists, or queues it and returns a `202 Accepted` status if missing.
 ```bash
 # File exists returns HTTP 200 and downloads the .mp3 with the original filename.
@@ -119,6 +128,9 @@ $ curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth"
 
 # Generate missing sections of multiple articles using a pipe-separated list just like the MediaWiki action API: https://en.wikipedia.org/w/api.php?action=query&prop=info&titles=Earth|Mars
 $ curl -X POST "https://wiki-tts.toolforge.org/generate?articles=Earth|Mars"
+
+# List all pre-generated articles with section counts
+$ curl "https://wiki-tts.toolforge.org/articles"
 ```
 
 #### 6.2. Visually via the browser
