@@ -292,7 +292,7 @@
     }
 
     try {
-        const res = await fetch('/api/articles');
+        const res = await fetch('/articles');
         if (!res.ok) throw new Error('Server responded with ' + res.status);
 
         const articles = await res.json();

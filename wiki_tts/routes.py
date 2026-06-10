@@ -203,7 +203,7 @@ def serve_library():
         return f.read()
 
 
-@app.get("/api/articles")
+@app.get("/articles")
 def get_articles():
     """Return all articles with pre-generated audio sections."""
     return _get_articles()
