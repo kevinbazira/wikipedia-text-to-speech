@@ -99,7 +99,7 @@ $ toolforge webservice status
 
 ### 6. Interacting with the service
 
-#### 6.1. Programmatically via cURL
+#### 6.1. Programmatically via API
 
 | Use case | Endpoint | Method | Responses |
 |---|---|---|---|
@@ -207,6 +207,16 @@ Three things to watch while the pipeline runs:
 | Disk space | `df -h /data/project/` | > 1.0 TB free |
 | Queue depth | `redis-cli -h redis.svc.tools.eqiad1.wikimedia.cloud LLEN wiki-tts-queue` | < 300 pending |
 | Worker health | `kubectl get pods \| grep celery` | All 5 Running, 0 restarts |
+| Storage footprint | `python3 scripts/measure_storage.py` | See per-file and per-article breakdown |
+
+To measure storage footprint (min/max/average file sizes, per-article aggregates, and projections):
+```bash
+$ toolforge webservice python3.11 shell
+$ cd ~/www/python/src
+$ source ~/www/python/venv/bin/activate
+$ python3 scripts/measure_storage.py
+$ exit
+```
 
 #### 7.4. Retrying failed articles
 
