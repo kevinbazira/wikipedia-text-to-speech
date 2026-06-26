@@ -1,8 +1,21 @@
+image: python:3.11
+
+stages:
+  - lint
+  - test
+
+before_script:
+  - pip install uv
+  - uv pip install --system -r requirements.txt
+  - uv pip install --system ruff pytest
+
 lint:
-  stage: test
-  image: python:3.11
-  before_script:
-    - pip install ruff
+  stage: lint
   script:
     - ruff check .
     - ruff format --check .
+
+test:
+  stage: test
+  script:
+    - pytest
