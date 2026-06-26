@@ -9,7 +9,7 @@ def test_removes_citation_brackets():
 
 
 def test_removes_phonetic_guides():
-    result = clean_spoken_text("Earth (English: /ˈɜːrθ/) is a planet.")
+    result = clean_spoken_text("Earth (/ˈɜːrθ/) is a planet.")
     assert result == "Earth is a planet."
 
 
