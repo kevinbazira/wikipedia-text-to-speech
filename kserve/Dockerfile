@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY alignment.py inference.py server.py ./
+COPY . ./
 
 # Models are mounted at /mnt/models by KServe (or bind-mounted for local dev)
 ENV MODEL_DIR=/mnt/models
