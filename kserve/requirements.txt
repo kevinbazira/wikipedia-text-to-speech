@@ -1,0 +1,6 @@
+kserve>=0.14.0
+kokoro-onnx>=0.2.0
+onnxruntime>=1.20.0
+transformers>=4.48.0
+scipy>=1.14.0
+numpy>=2.0.0,<3.0.0

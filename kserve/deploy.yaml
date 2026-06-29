@@ -1,0 +1,66 @@
+# KServe InferenceService for Wikipedia TTS (Kokoro + Wav2Vec2).
+#
+# Apply with:
+#   kubectl apply -f kserve/deploy.yaml
+#
+# Models must be pre-downloaded and available in the PVC or S3-compatible
+# storage referenced in the InferenceService spec.  The model-server expects:
+#
+#   /mnt/models/kokoro/kokoro-v1.0.onnx
+#   /mnt/models/kokoro/voices-v1.0.bin
+#   /mnt/models/wav2vec2/model.onnx
+#   /mnt/models/wav2vec2/processor/
+#
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: wiki-tts
+  labels:
+    app: wiki-tts
+spec:
+  predictor:
+    # Keep at least 1 replica warm so the first request doesn't pay cold-start.
+    minReplicas: 1
+    # Scale up when request concurrency rises.  Tune based on actual latency.
+    maxReplicas: 10
+    # Single-threaded inference, same threading model as v0 Toolforge workers.
+    containerConcurrency: 1
+    containers:
+      - name: kserve-container
+        image: <registry>/wiki-tts-kserve:latest  # replace with your registry
+        ports:
+          - containerPort: 8080
+            protocol: TCP
+        env:
+          - name: ORT_NUM_THREADS
+            value: "1"
+          - name: OMP_NUM_THREADS
+            value: "1"
+          - name: MKL_NUM_THREADS
+            value: "1"
+          - name: OPENBLAS_NUM_THREADS
+            value: "1"
+          - name: MODEL_DIR
+            value: /mnt/models
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "2"
+            memory: "8Gi"
+        readinessProbe:
+          httpGet:
+            path: /v1/models/wiki-tts
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+    # If GPU nodes are available, uncomment:
+    # nodeSelector:
+    #   accelerator: nvidia
