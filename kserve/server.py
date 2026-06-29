@@ -1,9 +1,10 @@
+import asyncio
 import base64
 import logging
 import os
 
 import numpy as np
-from inference import TTSInferencePipeline
+from inference import MAX_SEGMENT_CHARS, TTSInferencePipeline
 
 import kserve
 from kserve.errors import InferenceError, InvalidInput, ModelMissingError
@@ -63,12 +64,13 @@ class WikipediaTTSModel(kserve.Model):
             # Kokoro has a practical input-length limit (~800 chars).  The
             # orchestrator is expected to pre-chunk via _split_text().  This
             # is a non-fatal warning — the model may silently truncate.
-            if len(seg["text"]) > 800:
+            if len(seg["text"]) > MAX_SEGMENT_CHARS:
                 logger.warning(
-                    "Segment %d is %d chars (max recommended: 800); "
+                    "Segment %d is %d chars (max recommended: %d); "
                     "text may be truncated by Kokoro.  Pre-chunk via _split_text().",
                     i,
                     len(seg["text"]),
+                    MAX_SEGMENT_CHARS,
                 )
             # MIN_TEXT_LENGTH filtering (v0's 50-char gate) is the
             # orchestrator's responsibility — it owns text cleaning.
@@ -80,19 +82,27 @@ class WikipediaTTSModel(kserve.Model):
             "default_lang": payload.get("default_lang", "en-us"),
         }
 
-    def predict(self, inputs: dict, headers: dict[str, str] = None) -> dict:
-        """Run TTS inference + forced alignment on the preprocessed segments."""
+    async def predict(self, inputs: dict, headers: dict[str, str] = None) -> dict:
+        """Run TTS inference + forced alignment on the preprocessed segments.
+
+        Offloaded to a threadpool executor so the event loop stays responsive
+        to liveness / readiness probes during long synthesis runs.
+        """
         try:
             logger.info(
                 "Running inference on %d segments (voice=%s)...",
                 len(inputs["segments"]),
                 inputs["default_voice"],
             )
-            result = self.pipeline.predict(
-                segments=inputs["segments"],
-                default_voice=inputs["default_voice"],
-                default_speed=inputs["default_speed"],
-                default_lang=inputs["default_lang"],
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.pipeline.predict(
+                    segments=inputs["segments"],
+                    default_voice=inputs["default_voice"],
+                    default_speed=inputs["default_speed"],
+                    default_lang=inputs["default_lang"],
+                ),
             )
             return result
 
