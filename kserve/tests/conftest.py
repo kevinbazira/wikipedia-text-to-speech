@@ -15,7 +15,7 @@ if str(KSERVE_ROOT) not in sys.path:
 
 errors_module = types.ModuleType("kserve.errors")
 errors_module.InferenceError = type("InferenceError", (Exception,), {})
-errors_module.InvalidInput = type("InvalidInputError", (Exception,), {})
+errors_module.InvalidInput = type("InvalidInput", (Exception,), {})
 errors_module.ModelMissingError = type("ModelMissingError", (Exception,), {})
 
 
