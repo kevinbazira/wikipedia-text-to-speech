@@ -31,7 +31,7 @@ class Model:
 
 class ModelServer:
     def start(self, models) -> None:
-        return None
+        pass
 
 
 kserve_module.Model = Model
@@ -43,7 +43,7 @@ sys.modules["kserve.errors"] = errors_module
 
 
 @pytest.fixture(autouse=True)
-def _restore_numpy_module():
+def restore_numpy_module():
     previous_numpy = sys.modules.get("numpy")
     sys.modules["numpy"] = REAL_NUMPY
     try:
