@@ -53,14 +53,16 @@ spec:
           httpGet:
             path: /v1/models/wiki-tts
             port: 8080
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 10
+          failureThreshold: 5
         livenessProbe:
           httpGet:
             path: /health
             port: 8080
-          initialDelaySeconds: 30
+          initialDelaySeconds: 60
           periodSeconds: 30
+          timeoutSeconds: 10
     # If GPU nodes are available, uncomment:
     # nodeSelector:
     #   accelerator: nvidia

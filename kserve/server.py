@@ -60,6 +60,18 @@ class WikipediaTTSModel(kserve.Model):
                 raise InvalidInput(f"Segment {i} is missing `text`.")
             if not isinstance(seg["text"], str) or not seg["text"].strip():
                 raise InvalidInput(f"Segment {i} has empty or non-string `text`.")
+            # Kokoro has a practical input-length limit (~800 chars).  The
+            # orchestrator is expected to pre-chunk via _split_text().  This
+            # is a non-fatal warning — the model may silently truncate.
+            if len(seg["text"]) > 800:
+                logger.warning(
+                    "Segment %d is %d chars (max recommended: 800); "
+                    "text may be truncated by Kokoro.  Pre-chunk via _split_text().",
+                    i,
+                    len(seg["text"]),
+                )
+            # MIN_TEXT_LENGTH filtering (v0's 50-char gate) is the
+            # orchestrator's responsibility — it owns text cleaning.
 
         return {
             "segments": segments,

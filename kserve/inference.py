@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 FADE_LEN = 120  # samples for crossfade envelope
 
 
+MAX_SEGMENT_CHARS = 800  # Kokoro's practical input-length limit
+
+
 class TTSInferencePipeline:
     """Thin wrapper around Kokoro ONNX + Wav2Vec2 CTC aligner.
 
@@ -45,6 +48,10 @@ class TTSInferencePipeline:
         Timestamps are accumulated so they refer to positions in the final
         concatenated audio.
 
+        Each segment's ``text`` should be pre-chunked by the caller (e.g. via
+        ``_split_text``) to stay under ~800 characters — the practical input
+        limit for Kokoro.  Longer text may be silently truncated by the model.
+
         Args:
             segments: List of ``{"text": str, "voice"?: str, "speed"?: float, "lang"?: str}``.
             default_voice: Voice to use for segments that don't specify one.
@@ -69,6 +76,9 @@ class TTSInferencePipeline:
             lang = seg.get("lang", default_lang)
 
             chunk_audio, _ = self.kokoro.create(text, voice=voice, speed=speed, lang=lang)
+            # Defensive copy: kokoro.create() may return a view, cached buffer,
+            # or read-only array — in-place crossfade ops must own the memory.
+            chunk_audio = np.array(chunk_audio, dtype=np.float32, copy=True)
 
             # Word-level alignment
             chunk_ts = self.aligner.align(chunk_audio, self.sample_rate, text)
@@ -77,26 +87,39 @@ class TTSInferencePipeline:
                 t["end_ms"] += current_time_ms
                 all_timestamps.append(t)
 
-            chunk_duration_ms = (len(chunk_audio) / self.sample_rate) * 1000
-            current_time_ms += chunk_duration_ms
-
-            # Crossfade between consecutive chunks
-            if len(segments) == 1:
+            # Crossfade between consecutive chunks.
+            # Chunks shorter than FADE_LEN (~5 ms) skip crossfade — they're
+            # too short for the envelope and would produce misaligned tails.
+            if len(chunk_audio) < FADE_LEN:
                 audio_chunks.append(chunk_audio)
+                contributed_samples = len(chunk_audio)
+                prev_tail = None  # break the crossfade chain
+            elif len(segments) == 1:
+                audio_chunks.append(chunk_audio)
+                contributed_samples = len(chunk_audio)
             elif i == 0:
                 chunk_audio[-FADE_LEN:] *= fade_out
                 prev_tail = chunk_audio[-FADE_LEN:].copy()
                 audio_chunks.append(chunk_audio[:-FADE_LEN])
+                contributed_samples = len(chunk_audio) - FADE_LEN
             elif i < len(segments) - 1:
-                chunk_audio[:FADE_LEN] *= fade_in
-                chunk_audio[:FADE_LEN] += prev_tail
+                if prev_tail is not None:
+                    chunk_audio[:FADE_LEN] *= fade_in
+                    chunk_audio[:FADE_LEN] += prev_tail
                 chunk_audio[-FADE_LEN:] *= fade_out
                 prev_tail = chunk_audio[-FADE_LEN:].copy()
                 audio_chunks.append(chunk_audio[:-FADE_LEN])
+                contributed_samples = len(chunk_audio) - FADE_LEN
             else:
-                chunk_audio[:FADE_LEN] *= fade_in
-                chunk_audio[:FADE_LEN] += prev_tail
+                if prev_tail is not None:
+                    chunk_audio[:FADE_LEN] *= fade_in
+                    chunk_audio[:FADE_LEN] += prev_tail
                 audio_chunks.append(chunk_audio)
+                contributed_samples = len(chunk_audio)
+
+            # Advance the timestamp clock by what was actually contributed
+            # to the output (post-crossfade), not the full chunk length.
+            current_time_ms += (contributed_samples / self.sample_rate) * 1000
 
         audio = np.concatenate(audio_chunks) if audio_chunks else np.array([], dtype=np.float32)
 

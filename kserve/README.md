@@ -137,6 +137,10 @@ print('Aligner loaded OK, alignment result:', t)
 | `default_speed` | No | `1.0` | Fallback speaking rate |
 | `default_lang` | No | `"en-us"` | Fallback language code |
 
+**Segment size:** Each segment's `text` should be pre-chunked (e.g. via the orchestrator's `_split_text`) to stay under ~800 characters — Kokoro's practical input-length limit. Longer text may be silently truncated by the model. The model-server logs a warning for segments exceeding this threshold but does not reject them.
+
+**Response size:** The response contains base64-encoded float32 PCM audio (24 kHz mono). A typical 10-second section is ~2.5 MB encoded. Callers should send one section per request (heading segment + a few content chunks) rather than batching an entire article. Sending dozens of sections in a single request will produce a multi-hundred-MB response.
+
 **Response:**
 
 ```json
