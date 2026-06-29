@@ -43,9 +43,8 @@ def _install_stubs() -> None:
 
 _install_stubs()
 
-from server import WikipediaTTSModel  # noqa: E402
-
 from kserve.errors import InferenceError, InvalidInput  # noqa: E402
+from server import WikipediaTTSModel  # noqa: E402
 
 SAMPLE_RATE = 24000
 
